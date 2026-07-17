@@ -22,7 +22,7 @@ jobs:
         with:
           submodules: 'recursive'
 
-      # 2. Clona TU fork del driver de cámara usando la variable del mismo propietario (${{ github.repository_owner }})
+      # 2. Clona TU fork del driver de cámara
       - name: Checkout Camera Driver fork
         uses: actions/checkout@v4
         with:
@@ -59,7 +59,8 @@ jobs:
           echo "PIP_CONSTRAINT=/tmp/constraints.txt" >> $GITHUB_ENV
 
           cd ~/esp-idf
-          ./install.sh esp32s3
+          # Instalamos los toolchains necesarios (esp32 y esp32s3)
+          ./install.sh esp32,esp32s3
 
       - name: Build Firmware
         run: |
@@ -76,9 +77,9 @@ jobs:
           # 1. Compilar mpy-cross
           make -C mpy-cross
 
-          # 2. Compilar el puerto ESP32-S3 OCTAL e inyectar TU driver C
+          # 2. Compilar el puerto especificando la placa S3 desde los submódulos
           cd ports/esp32
-          make submodules
+          make submodules BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=OCTAL
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=OCTAL USER_C_MODULES="${{ github.workspace }}/camera-driver/src/micropython.cmake"
 
       - name: Upload Firmware Artifacts
