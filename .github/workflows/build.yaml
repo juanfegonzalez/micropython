@@ -19,7 +19,7 @@ jobs:
       with:
         repository: 'micropython/micropython'
         fetch-depth: 0
-        submodules: 'recursive' # Descarga de golpe esp-idf y dependencias de forma nativa
+        submodules: 'recursive'
 
     - name: Checkout Custom Camera Driver
       uses: actions/checkout@v4
@@ -57,7 +57,6 @@ jobs:
         # 2. Instalar las herramientas del compilador
         ./esp-idf/install.sh
 
-
     - name: Build mpy-cross
       run: |
         make -C mpy-cross
@@ -80,11 +79,13 @@ jobs:
         # Activamos el entorno de herramientas de Espressif
         source ports/esp32/esp-idf/export.sh
         
+        # Guardamos la ruta absoluta real del driver antes de movernos de directorio
+        DRIVER_PATH="${{ github.workspace }}/camera-driver/src/micropython.cmake"
+        
         cd ports/esp32
         
-        # Corrección del path absoluto del driver utilizando la raíz del agente de compilación
-        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/../camera-driver/src/micropython.cmake"
-
+        # Compilación usando la ruta absoluta limpia sin salirnos del workspace
+        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="$DRIVER_PATH"
 
     - name: Upload Firmware Artifacts
       uses: actions/upload-artifact@v4
