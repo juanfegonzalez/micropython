@@ -1,0 +1,91 @@
+name: Build ESP32-S3 Octal Camera Firmware
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Clona TU fork de MicroPython
+      - name: Checkout MicroPython fork
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      # 2. Clona TU fork del driver de cámara usando la variable del mismo propietario (${{ github.repository_owner }})
+      - name: Checkout Camera Driver fork
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/micropython-camera-driver
+          path: camera-driver
+          submodules: 'recursive'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libffi-dev git pkg-config python3-pip python3-virtualenv
+
+      - name: Cache ESP-IDF
+        id: cache-esp-idf
+        uses: actions/cache@v4
+        with:
+          path: ~/esp-idf
+          key: ${{ runner.os }}-esp-idf-v5.0.4
+
+      - name: Clone ESP-IDF (if not cached)
+        if: steps.cache-esp-idf.outputs.cache-hit != 'true'
+        run: |
+          git clone --recursive -b v5.0.4 https://github.com/espressif/esp-idf.git ~/esp-idf
+
+      - name: Setup constraints and Install ESP-IDF
+        run: |
+          echo "setuptools<70.0.0" > /tmp/constraints.txt
+          export PIP_CONSTRAINT=/tmp/constraints.txt
+          echo "PIP_CONSTRAINT=/tmp/constraints.txt" >> $GITHUB_ENV
+
+          cd ~/esp-idf
+          ./install.sh esp32s3
+
+      - name: Build Firmware
+        run: |
+          # Preparar entorno de Python
+          export PIP_CONSTRAINT=/tmp/constraints.txt
+          source /home/runner/.espressif/python_env/idf5.0_py3.10_env/bin/activate
+          pip install "setuptools<70.0.0"
+          pip install -r ~/esp-idf/tools/requirements/requirements.core.txt -c /home/runner/.espressif/espidf.constraints.v5.0.txt
+
+          # Cargar entorno ESP-IDF
+          export IDF_SKIP_CHECK=1
+          source ~/esp-idf/export.sh
+
+          # 1. Compilar mpy-cross
+          make -C mpy-cross
+
+          # 2. Compilar el puerto ESP32-S3 OCTAL e inyectar TU driver C
+          cd ports/esp32
+          make submodules
+          make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=OCTAL USER_C_MODULES="${{ github.workspace }}/camera-driver/src/micropython.cmake"
+
+      - name: Upload Firmware Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: micropython-esp32s3-octal-camera-firmware
+          path: |
+            ports/esp32/build-ESP32_GENERIC_S3-OCTAL/firmware.bin
+            ports/esp32/build-ESP32_GENERIC_S3-OCTAL/bootloader.bin
+            ports/esp32/build-ESP32_GENERIC_S3-OCTAL/partition-table.bin
