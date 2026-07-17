@@ -45,9 +45,18 @@ jobs:
 
     - name: Install ESP-IDF Tools
       run: |
-        # Al estar el submódulo ya clonado por el checkout, instalamos las herramientas directamente
         cd ports/esp32
+        
+        # 1. Si la carpeta esp-idf está vacía o no existe, la clonamos manualmente a la versión v5.3
+        if [ ! -d "esp-idf" ] || [ -z "$(ls -A esp-idf 2>/dev/null)" ]; then
+          echo "Clonando ESP-IDF v5.3 de forma manual..."
+          rm -rf esp-idf
+          git clone -b v5.3 --recursive https://github.com/espressif/esp-idf.git esp-idf
+        fi
+        
+        # 2. Instalar las herramientas del compilador
         ./esp-idf/install.sh
+
 
     - name: Build mpy-cross
       run: |
