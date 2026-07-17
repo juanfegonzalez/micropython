@@ -14,13 +14,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # 1. Clonar MicroPython explícitamente en su propia carpeta
     - name: Checkout MicroPython with Submodules
       uses: actions/checkout@v4
       with:
         repository: 'micropython/micropython'
         fetch-depth: 0
         submodules: 'recursive'
+        path: micropython-core
 
+    # 2. Clonar el driver de la cámara en otra carpeta al mismo nivel
     - name: Checkout Custom Camera Driver
       uses: actions/checkout@v4
       with:
@@ -41,30 +44,28 @@ jobs:
       with:
         path: |
           ~/.espressif
-        key: ${{ runner.os }}-esp-idf-v5.3-${{ hashFiles('ports/esp32/Makefile') }}
+        key: ${{ runner.os }}-esp-idf-v5.3-${{ hashFiles('micropython-core/ports/esp32/Makefile') }}
 
     - name: Install ESP-IDF Tools
       run: |
-        cd ports/esp32
+        cd micropython-core/ports/esp32
         
-        # 1. Si la carpeta esp-idf está vacía o no existe, la clonamos manualmente a la versión v5.3
         if [ ! -d "esp-idf" ] || [ -z "$(ls -A esp-idf 2>/dev/null)" ]; then
           echo "Clonando ESP-IDF v5.3 de forma manual..."
           rm -rf esp-idf
           git clone -b v5.3 --recursive https://github.com/espressif/esp-idf.git esp-idf
         fi
         
-        # 2. Instalar las herramientas del compilador
         ./esp-idf/install.sh
 
     - name: Build mpy-cross
       run: |
-        make -C mpy-cross
+        make -C micropython-core/mpy-cross
 
     - name: Patch Framework (Fix Bootloader & JPEG Conflict)
       run: |
-        # Evita que el componente esp_jpeg se intente compilar dentro del entorno limitado del Bootloader
-        find . -name "CMakeLists.txt" | grep "esp_jpeg" | xargs -I {} sh -c '
+        # Ejecutar el parche dentro de la carpeta asignada a MicroPython
+        find micropython-core -name "CMakeLists.txt" | grep "esp_jpeg" | xargs -I {} sh -c '
           if ! grep -q "BOOTLOADER_BUILD" {}; then
             echo "if(NOT BOOTLOADER_BUILD)" > {}.tmp
             cat {} >> {}.tmp
@@ -77,10 +78,19 @@ jobs:
     - name: Compile Firmware
       run: |
         # Activamos el entorno de herramientas de Espressif
-        source ports/esp32/esp-idf/export.sh
+        source micropython-core/ports/esp32/esp-idf/export.sh
         
-        cd ports/esp32
+        cd micropython-core/ports/esp32
         
-        # Pasamos la ruta absoluta de la CARPETA 'src' inyectando directamente el token de GitHub
-        # Sin intermediarios y apuntando al directorio, que es lo que espera MicroPython
-        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/camera-driver/src"
+        # Pasamos la ruta absoluta del sistema al compilador de CMake usando la variable de entorno global de GitHub.
+        # Al estar los repositorios en carpetas paralelas (micropython-core y camera-driver), la ruta no se rompe.
+        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="$GITHUB_WORKSPACE/camera-driver/src"
+
+    - name: Upload Firmware Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: micropython-esp32s3-camera-firmware
+        path: |
+          micropython-core/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
+          micropython-core/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/bootloader/bootloader.bin
+          micropython-core/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/partition_table/partition-table.bin
