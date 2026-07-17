@@ -79,19 +79,8 @@ jobs:
         # Activamos el entorno de herramientas de Espressif
         source ports/esp32/esp-idf/export.sh
         
-        # Guardamos la ruta absoluta real del driver antes de movernos de directorio
-        DRIVER_PATH="${{ github.workspace }}/camera-driver/src/micropython.cmake"
-        
         cd ports/esp32
         
-        # Compilación usando la ruta absoluta limpia sin salirnos del workspace
-        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="$DRIVER_PATH"
-
-    - name: Upload Firmware Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: micropython-esp32s3-camera-firmware
-        path: |
-          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
-          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/bootloader/bootloader.bin
-          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/partition_table/partition-table.bin
+        # Pasamos la ruta absoluta de la CARPETA 'src' inyectando directamente el token de GitHub
+        # Sin intermediarios y apuntando al directorio, que es lo que espera MicroPython
+        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/camera-driver/src"
