@@ -82,8 +82,9 @@ jobs:
         
         cd ports/esp32
         
-        # Compilación controlando la paralelización para proteger la RAM de la máquina virtual
-        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/camera-driver/src/micropython.cmake"
+        # Corrección del path absoluto del driver utilizando la raíz del agente de compilación
+        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/../camera-driver/src/micropython.cmake"
+
 
     - name: Upload Firmware Artifacts
       uses: actions/upload-artifact@v4
