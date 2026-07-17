@@ -40,44 +40,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libffi-dev git pkg-config python3-pip python3-virtualenv
 
+      # Se actualiza la clave del caché a ESP-IDF v5.3.1
       - name: Cache ESP-IDF
         id: cache-esp-idf
         uses: actions/cache@v4
         with:
           path: ~/esp-idf
-          key: ${{ runner.os }}-esp-idf-v5.0.4
+          key: ${{ runner.os }}-esp-idf-v5.3.1
 
+      # Se clona el tag v5.3.1 de ESP-IDF (requerido >=5.3.0)
       - name: Clone ESP-IDF (if not cached)
         if: steps.cache-esp-idf.outputs.cache-hit != 'true'
         run: |
-          git clone --recursive -b v5.0.4 https://github.com/espressif/esp-idf.git ~/esp-idf
+          git clone --recursive -b v5.3.1 https://github.com/espressif/esp-idf.git ~/esp-idf
 
       - name: Setup constraints and Install ESP-IDF
         run: |
-          echo "setuptools<70.0.0" > /tmp/constraints.txt
-          export PIP_CONSTRAINT=/tmp/constraints.txt
-          echo "PIP_CONSTRAINT=/tmp/constraints.txt" >> $GITHUB_ENV
-
           cd ~/esp-idf
-          # Instalamos los toolchains necesarios (esp32 y esp32s3)
           ./install.sh esp32,esp32s3
 
       - name: Build Firmware
         run: |
-          # Preparar entorno de Python
-          export PIP_CONSTRAINT=/tmp/constraints.txt
-          source /home/runner/.espressif/python_env/idf5.0_py3.10_env/bin/activate
-          pip install "setuptools<70.0.0"
-          pip install -r ~/esp-idf/tools/requirements/requirements.core.txt -c /home/runner/.espressif/espidf.constraints.v5.0.txt
+          # Activar el venv de Python de ESP-IDF v5.3
+          source /home/runner/.espressif/python_env/idf5.3_py3.10_env/bin/activate || source /home/runner/.espressif/python_env/idf5.3_py3.10_env/bin/activate 2>/dev/null || true
 
-          # Cargar entorno ESP-IDF
+          # Cargar variables de entorno de ESP-IDF
           export IDF_SKIP_CHECK=1
           source ~/esp-idf/export.sh
 
           # 1. Compilar mpy-cross
           make -C mpy-cross
 
-          # 2. Compilar subórdenes y el puerto ESP32-S3 Octal con la variante oficial
+          # 2. Compilar subórdenes y el puerto ESP32-S3 Octal
           cd ports/esp32
           make submodules BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/camera-driver/src/micropython.cmake"
