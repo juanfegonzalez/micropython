@@ -77,10 +77,10 @@ jobs:
           # 1. Compilar mpy-cross
           make -C mpy-cross
 
-          # 2. Compilar el puerto especificando la placa S3 desde los submódulos
+          # 2. Compilar subórdenes y el puerto ESP32-S3 Octal
           cd ports/esp32
-          make submodules BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=OCTAL
-          make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=OCTAL USER_C_MODULES="${{ github.workspace }}/camera-driver/src/micropython.cmake"
+          make submodules BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=FLASH_16M_OCTAL
+          make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=FLASH_16M_OCTAL USER_C_MODULES="${{ github.workspace }}/camera-driver/src/micropython.cmake"
 
       - name: Upload Firmware Artifacts
         uses: actions/upload-artifact@v4
