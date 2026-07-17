@@ -14,11 +14,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout MicroPython
+    - name: Checkout MicroPython with Submodules
       uses: actions/checkout@v4
       with:
         repository: 'micropython/micropython'
         fetch-depth: 0
+        submodules: 'recursive' # Descarga de golpe esp-idf y dependencias de forma nativa
 
     - name: Checkout Custom Camera Driver
       uses: actions/checkout@v4
@@ -28,33 +29,25 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-python-version: '3.10'
+        python-version: '3.10'
 
     - name: Install Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential libffi-dev git pkg-config cmake ninja-build
 
-    - name: Cache ESP-IDF and Tools
+    - name: Cache ESP-IDF Tools
       uses: actions/cache@v4
       with:
         path: |
           ~/.espressif
-          ports/esp32/esp-idf
         key: ${{ runner.os }}-esp-idf-v5.3-${{ hashFiles('ports/esp32/Makefile') }}
 
-    - name: Install ESP-IDF
+    - name: Install ESP-IDF Tools
       run: |
-        # 1. Usar el script nativo de MicroPython para descargar los submódulos de la esp32 sin tocar el Makefile
-        python3 tools/gitsubmodules.py update ports/esp32/esp-idf
-        python3 tools/gitsubmodules.py update lib/extmod
-        
-        # 2. Una vez descargado físicamente en su sitio, instalar las herramientas de Espressif
+        # Al estar el submódulo ya clonado por el checkout, instalamos las herramientas directamente
         cd ports/esp32
         ./esp-idf/install.sh
-
-
-
 
     - name: Build mpy-cross
       run: |
@@ -62,7 +55,7 @@ jobs:
 
     - name: Patch Framework (Fix Bootloader & JPEG Conflict)
       run: |
-        # Evita que el componente esp_jpeg se compile dentro del entorno limitado del Bootloader
+        # Evita que el componente esp_jpeg se intente compilar dentro del entorno limitado del Bootloader
         find . -name "CMakeLists.txt" | grep "esp_jpeg" | xargs -I {} sh -c '
           if ! grep -q "BOOTLOADER_BUILD" {}; then
             echo "if(NOT BOOTLOADER_BUILD)" > {}.tmp
@@ -75,12 +68,12 @@ jobs:
 
     - name: Compile Firmware
       run: |
-        # Activar el entorno virtual de ESP-IDF
+        # Activamos el entorno de herramientas de Espressif
         source ports/esp32/esp-idf/export.sh
         
         cd ports/esp32
         
-        # Compilación controlando los hilos (-j2) para asegurar estabilidad en la RAM de la VM
+        # Compilación controlando la paralelización para proteger la RAM de la máquina virtual
         make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/camera-driver/src/micropython.cmake"
 
     - name: Upload Firmware Artifacts
