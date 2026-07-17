@@ -3,11 +3,9 @@ name: Build ESP32-S3 Octal Camera Firmware
 on:
   push:
     branches:
-      - master
       - main
   pull_request:
     branches:
-      - master
       - main
   workflow_dispatch:
 
@@ -16,76 +14,74 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Clona TU fork de MicroPython
-      - name: Checkout MicroPython fork
-        uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
+    - name: Checkout MicroPython
+      uses: actions/checkout@v4
+      with:
+        repository: 'micropython/micropython'
+        fetch-depth: 0
 
-      # 2. Clona TU fork del driver de cámara
-      - name: Checkout Camera Driver fork
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/micropython-camera-driver
-          path: camera-driver
-          submodules: 'recursive'
+    - name: Checkout Custom Camera Driver
+      uses: actions/checkout@v4
+      with:
+        path: camera-driver
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-python-version: '3.10'
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libffi-dev git pkg-config python3-pip python3-virtualenv
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libffi-dev git pkg-config cmake ninja-build
 
-      # Cache para el entorno de ESP-IDF v5.3.1
-      - name: Cache ESP-IDF
-        id: cache-esp-idf
-        uses: actions/cache@v4
-        with:
-          path: ~/esp-idf
-          key: ${{ runner.os }}-esp-idf-v5.3.1
+    - name: Cache ESP-IDF and Tools
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.espressif
+          ports/esp32/esp-idf
+        key: ${{ runner.os }}-esp-idf-v5.3-${{ hashFiles('ports/esp32/Makefile') }}
 
-      # Clona el tag v5.3.1 si no está en la caché (Requerido >=5.3.0)
-      - name: Clone ESP-IDF (if not cached)
-        if: steps.cache-esp-idf.outputs.cache-hit != 'true'
-        run: |
-          git clone --recursive -b v5.3.1 https://github.com/espressif/esp-idf.git ~/esp-idf
+    - name: Install ESP-IDF
+      run: |
+        cd ports/esp32
+        # Inicializa el entorno e instala las herramientas de la v5.3 si no están en cache
+        make submodules BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
+        ./esp-idf/install.sh
 
-      - name: Setup constraints and Install ESP-IDF
-        run: |
-          cd ~/esp-idf
-          ./install.sh esp32,esp32s3
+    - name: Build mpy-cross
+      run: |
+        make -C mpy-cross
 
-      # Clonar el componente de la cámara que ESP-IDF v5.3.1 ya no incluye de manera nativa
-      - name: Clone esp32-camera component into ESP-IDF
-        run: |
-          git clone --recursive https://github.com/espressif/esp32-camera.git ~/esp-idf/components/esp32-camera
+    - name: Patch Framework (Fix Bootloader & JPEG Conflict)
+      run: |
+        # Evita que el componente esp_jpeg se compile dentro del entorno limitado del Bootloader
+        find . -name "CMakeLists.txt" | grep "esp_jpeg" | xargs -I {} sh -c '
+          if ! grep -q "BOOTLOADER_BUILD" {}; then
+            echo "if(NOT BOOTLOADER_BUILD)" > {}.tmp
+            cat {} >> {}.tmp
+            echo "endif()" >> {}.tmp
+            mv {}.tmp {}
+            echo "Parcheado bootloader en: {}"
+          fi
+        '
 
-      - name: Build Firmware
-        run: |
-          # Activar el venv de Python de ESP-IDF v5.3
-          source /home/runner/.espressif/python_env/idf5.3_py3.10_env/bin/activate || source /home/runner/.espressif/python_env/idf5.3_py3.10_env/bin/activate 2>/dev/null || true
+    - name: Compile Firmware
+      run: |
+        # Activar el entorno virtual de ESP-IDF
+        source ports/esp32/esp-idf/export.sh
+        
+        cd ports/esp32
+        
+        # Compilación controlando los hilos (-j2) para asegurar estabilidad en la RAM de la VM
+        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/camera-driver/src/micropython.cmake"
 
-          # Cargar variables de entorno de ESP-IDF
-          export IDF_SKIP_CHECK=1
-          source ~/esp-idf/export.sh
-
-          # 1. Compilar mpy-cross
-          make -C mpy-cross
-
-          # 2. Compilar subórdenes de MicroPython y la placa con el entorno corregido
-          cd ports/esp32
-          make submodules BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
-          make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/camera-driver/src/micropython.cmake"
-
-      - name: Upload Firmware Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: micropython-esp32s3-octal-camera-firmware
-          path: |
-            ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
-            ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/bootloader.bin
-            ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/partition-table.bin
+    - name: Upload Firmware Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: micropython-esp32s3-camera-firmware
+        path: |
+          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
+          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/bootloader/bootloader.bin
+          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/partition_table/partition-table.bin
