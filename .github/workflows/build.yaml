@@ -45,13 +45,14 @@ jobs:
 
     - name: Install ESP-IDF
       run: |
+        # 1. Usar el script nativo de MicroPython para descargar los submódulos de la esp32 sin tocar el Makefile
+        python3 tools/gitsubmodules.py update ports/esp32/esp-idf
+        python3 tools/gitsubmodules.py update lib/extmod
+        
+        # 2. Una vez descargado físicamente en su sitio, instalar las herramientas de Espressif
         cd ports/esp32
-        
-        # 1. Forzar a que el Makefile inicialice los submódulos de Git de forma nativa
-        make submodules
-        
-        # 2. Ahora que el framework se ha descargado físicamente, instalamos sus herramientas
         ./esp-idf/install.sh
+
 
 
 
