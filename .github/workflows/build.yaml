@@ -45,10 +45,14 @@ jobs:
 
     - name: Install ESP-IDF
       run: |
+        # 1. Traer los submódulos base necesarios para el puerto esp32 vía Git de forma directa
+        git submodule update --init --recursive ports/esp32/esp-idf
+        git submodule update --init --recursive lib/extmod
+        
+        # 2. Ahora que esp-idf existe físicamente, instalamos sus herramientas de compilación
         cd ports/esp32
-        # Inicializa el entorno e instala las herramientas de la v5.3 si no están en cache
-        make submodules BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
         ./esp-idf/install.sh
+
 
     - name: Build mpy-cross
       run: |
