@@ -3,10 +3,10 @@ name: Build ESP32-S3 Octal Camera Firmware
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
     branches:
-      - master
+      - main
   workflow_dispatch:
 
 jobs:
@@ -26,13 +26,14 @@ jobs:
         repository: '${{ github.repository_owner }}/micropython-camera-driver'
         path: micropython-camera-driver
 
-    # Descarga nativa del repositorio exacto de tu captura en la ruta esperada
+    # Descargamos el repositorio de tu captura en una carpeta intermedia
     - name: Bring Berkeley DB Dependency (BTree)
       uses: actions/checkout@v4
       with:
         repository: 'pfalcon/berkeley-db-1.xx'
-        path: lib/berkeley-db
+        path: btree-temp
 
+    
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -82,19 +83,29 @@ jobs:
         rm -rf "${{ github.workspace }}/ports/esp32/main/camera_modules"
         mkdir -p "${{ github.workspace }}/ports/esp32/main/camera_modules"
         cp -r "${{ github.workspace }}/micropython-camera-driver/src/." "${{ github.workspace }}/ports/esp32/main/camera_modules"
+
+    # PASO CLAVE: Estructurar la carpeta anidada como exige extmod.cmake
+    - name: Prepare and Verify Berkeley DB Path
+      run: |
+        rm -rf lib/berkeley-db
+        # Creamos la ruta anidada exacta: lib/berkeley-db/berkeley-db
+        mkdir -p lib/berkeley-db/berkeley-db
         
-        echo "Contenido verificado en camera_modules:"
-        ls -la "${{ github.workspace }}/ports/esp32/main/camera_modules"
+        # Volcamos todo el contenido que bajamos de pfalcon dentro de ella
+        cp -r btree-temp/. lib/berkeley-db/berkeley-db/
+        
+        echo "=== Verificando que el archivo clave existe ==="
+        ls -la lib/berkeley-db/berkeley-db/README
 
     - name: Compile Firmware
       run: |
         source ports/esp32/esp-idf/export.sh
         cd ports/esp32
         
-        # Limpieza higiénica para que CMake indexe la nueva carpeta lib/berkeley-db desde cero
+        # Forzamos una limpieza total de la caché previa de CMake
         rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
         
-        # Compilación estándar con btree activo
+        # Compilación limpia
         make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
 
     - name: Upload Firmware Artifacts
