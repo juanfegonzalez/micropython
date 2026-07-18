@@ -28,9 +28,8 @@ jobs:
 
     - name: Initialize MicroPython Core Submodules
       run: |
-        # Inicializa de forma nativa las librerías del núcleo (como berkeley-db en lib/berkeley-db)
-        git submodule update --init lib/berkeley-db
-        git submodule update --init lib/extmod
+        # Inicializa de forma nativa todos los submódulos registrados en la raíz (evitando conflictos con scripts de puertos)
+        git submodule update --init --recursive --depth 1
 
     - name: Set up Python
       uses: actions/setup-python@v5
