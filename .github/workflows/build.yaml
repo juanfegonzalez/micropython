@@ -70,13 +70,16 @@ jobs:
           fi
         '
 
-    - name: Link Camera Driver to Expected Path
+    - name: Copy Camera Driver to Expected Path
       run: |
-        # Creamos el enlace simbólico para engañar al CMake interno de tu fork
-        # Mapea la carpeta del repositorio del driver directamente a la ruta que pide el error
-        ln -s "${{ github.workspace }}/micropython-camera-driver" "${{ github.workspace }}/ports/esp32/main/camera_modules"
+        # 1. Asegurar que el directorio de destino esté limpio y vacío
+        rm -rf "${{ github.workspace }}/ports/esp32/main/camera_modules"
+        mkdir -p "${{ github.workspace }}/ports/esp32/main/camera_modules"
         
-        echo "Enlace simbólico creado con éxito:"
+        # 2. Copiar únicamente el contenido de 'src' para que los archivos queden en la raíz esperada
+        cp -r "${{ github.workspace }}/micropython-camera-driver/src/." "${{ github.workspace }}/ports/esp32/main/camera_modules"
+        
+        echo "Contenido verificado en camera_modules:"
         ls -la "${{ github.workspace }}/ports/esp32/main/camera_modules"
 
     - name: Compile Firmware
