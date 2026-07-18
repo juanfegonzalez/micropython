@@ -98,11 +98,10 @@ jobs:
         
         cd ports/esp32
         
-        # 2. Compilación directa desactivando explícitamente el módulo btree
-        # Al poner MICROPY_PY_BTREE=0, CMake se saltará por completo la validación del submódulo maldito.
+        # 2. Forzamos a CMake y al Makefile a apagar el módulo btree por completo
         make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
-          CFLAGS_EXTRA="-DMICROPY_PY_BTREE=0" \
-          MICROPY_PY_BTREE=0
+          MICROPY_PY_BTREE=0 \
+          EXTRA_DARGS="-DMICROPY_PY_BTREE=0"
 
     - name: Upload Firmware Artifacts
       uses: actions/upload-artifact@v4
