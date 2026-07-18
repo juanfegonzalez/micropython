@@ -26,6 +26,12 @@ jobs:
         repository: '${{ github.repository_owner }}/micropython-camera-driver'
         path: micropython-camera-driver
 
+    - name: Initialize MicroPython Core Submodules
+      run: |
+        # Inicializa de forma nativa las librerías del núcleo (como berkeley-db en lib/berkeley-db)
+        git submodule update --init lib/berkeley-db
+        git submodule update --init lib/extmod
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -72,11 +78,8 @@ jobs:
 
     - name: Copy Camera Driver to Expected Path
       run: |
-        # 1. Asegurar que el directorio de destino esté limpio y vacío
         rm -rf "${{ github.workspace }}/ports/esp32/main/camera_modules"
         mkdir -p "${{ github.workspace }}/ports/esp32/main/camera_modules"
-        
-        # 2. Copiar únicamente el contenido de 'src' para que los archivos queden en la raíz esperada
         cp -r "${{ github.workspace }}/micropython-camera-driver/src/." "${{ github.workspace }}/ports/esp32/main/camera_modules"
         
         echo "Contenido verificado en camera_modules:"
@@ -84,13 +87,17 @@ jobs:
 
     - name: Compile Firmware
       run: |
-        # 1. Activamos el entorno de herramientas de Espressif
         source ports/esp32/esp-idf/export.sh
-        
         cd ports/esp32
         
-        # 2. Inicializar los submódulos ligeros del núcleo de MicroPython (como berkeley-db)
-        make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT submodules
-        
-        # 3. Lanzar la compilación del firmware completo
+        # Compilación directa controlando los hilos de la máquina virtual
         make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
+
+    - name: Upload Firmware Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: micropython-esp32s3-camera-firmware
+        path: |
+          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
+          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/bootloader/bootloader.bin
+          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/partition_table/partition-table.bin
