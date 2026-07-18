@@ -84,9 +84,13 @@ jobs:
 
     - name: Compile Firmware
       run: |
+        # 1. Activamos el entorno de herramientas de Espressif
         source ports/esp32/esp-idf/export.sh
+        
         cd ports/esp32
         
-        # Lanzamos la compilación. Como el enlace simbólico ya está en su sitio, 
-        # encontrará camera_modules automáticamente.
+        # 2. Inicializar los submódulos ligeros del núcleo de MicroPython (como berkeley-db)
+        make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT submodules
+        
+        # 3. Lanzar la compilación del firmware completo
         make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
