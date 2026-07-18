@@ -26,17 +26,7 @@ jobs:
         repository: '${{ github.repository_owner }}/micropython-camera-driver'
         path: micropython-camera-driver
 
-    - name: Initialize MicroPython Core Submodules
-      run: |
-        # 1. Asegurar que la carpeta esté limpia
-        rm -rf lib/berkeley-db
-        
-        # 2. Clonar directamente el repositorio oficial de berkeley-db que usa MicroPython
-        echo "Clonando de forma directa la dependencia berkeley-db..."
-        git clone --depth 1 https://github.com/pfalcon/berkeley-db-1.12.git lib/berkeley-db
-        
-        # 3. Verificar que el archivo clave existe para engañar a extmod.cmake
-        ls -la lib/berkeley-db
+    # Eliminado el paso de clonar berkeley-db porque está desactivado
 
     - name: Set up Python
       uses: actions/setup-python@v5
