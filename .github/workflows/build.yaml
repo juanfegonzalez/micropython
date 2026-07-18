@@ -26,8 +26,6 @@ jobs:
         repository: '${{ github.repository_owner }}/micropython-camera-driver'
         path: micropython-camera-driver
 
-    # Eliminado el paso de clonar berkeley-db porque está desactivado
-
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -81,17 +79,23 @@ jobs:
         echo "Contenido verificado en camera_modules:"
         ls -la "${{ github.workspace }}/ports/esp32/main/camera_modules"
 
+    - name: Disable BTree in Source C Headers
+      run: |
+        # Inyectamos de forma estricta la desactivación en el header de configuración global del puerto esp32
+        # Esto sobrescribe cualquier valor por defecto antes de que CMake analice los submódulos.
+        echo "#define MICROPY_PY_BTREE (0)" >> ports/esp32/mpconfigport.h
+        echo "Parche aplicado a mpconfigport.h para desactivar btree"
+
     - name: Compile Firmware
       run: |
-        # 1. Activamos el entorno de herramientas de Espressif
         source ports/esp32/esp-idf/export.sh
-        
         cd ports/esp32
         
-        # 2. Forzamos a CMake y al Makefile a apagar el módulo btree por completo
-        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
-          MICROPY_PY_BTREE=0 \
-          EXTRA_DARGS="-DMICROPY_PY_BTREE=0"
+        # Limpiamos posibles residuos de configuraciones de CMake anteriores
+        rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
+        
+        # Compilación directa limpia
+        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
 
     - name: Upload Firmware Artifacts
       uses: actions/upload-artifact@v4
