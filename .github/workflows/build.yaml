@@ -17,14 +17,14 @@ jobs:
     - name: Checkout MicroPython Base
       uses: actions/checkout@v4
       with:
-        repository: '${{ github.repository_owner }}/micropython' # Usa tu propio fork de micropython
+        repository: '${{ github.repository_owner }}/micropython'
         fetch-depth: 0
 
     - name: Checkout Custom Camera Driver
       uses: actions/checkout@v4
       with:
-        repository: '${{ github.repository_owner }}/micropython-camera-driver' # Tu fork del driver
-        path: micropython-camera-driver # Lo descarga en una carpeta limpia llamada así
+        repository: '${{ github.repository_owner }}/micropython-camera-driver'
+        path: micropython-camera-driver
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -46,7 +46,6 @@ jobs:
     - name: Install ESP-IDF Tools
       run: |
         cd ports/esp32
-        # Si la carpeta esp-idf está vacía o no existe, la clonamos manualmente a la versión v5.3
         if [ ! -d "esp-idf" ] || [ -z "$(ls -A esp-idf 2>/dev/null)" ]; then
           echo "Clonando ESP-IDF v5.3 de forma manual..."
           rm -rf esp-idf
@@ -71,21 +70,20 @@ jobs:
           fi
         '
 
+    - name: Link Camera Driver to Expected Path
+      run: |
+        # Creamos el enlace simbólico para engañar al CMake interno de tu fork
+        # Mapea la carpeta del repositorio del driver directamente a la ruta que pide el error
+        ln -s "${{ github.workspace }}/micropython-camera-driver" "${{ github.workspace }}/ports/esp32/main/camera_modules"
+        
+        echo "Enlace simbólico creado con éxito:"
+        ls -la "${{ github.workspace }}/ports/esp32/main/camera_modules"
+
     - name: Compile Firmware
       run: |
-        # Activamos el entorno de herramientas de Espressif
         source ports/esp32/esp-idf/export.sh
-        
         cd ports/esp32
         
-        # Apuntamos USER_C_MODULES directamente a la carpeta del repositorio clonado del driver
-        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/micropython-camera-driver/src"
-
-    - name: Upload Firmware Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: micropython-esp32s3-camera-firmware
-        path: |
-          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
-          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/bootloader/bootloader.bin
-          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/partition_table/partition-table.bin
+        # Lanzamos la compilación. Como el enlace simbólico ya está en su sitio, 
+        # encontrará camera_modules automáticamente.
+        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
