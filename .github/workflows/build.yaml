@@ -14,17 +14,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout MicroPython with Submodules
+    - name: Checkout MicroPython Base
       uses: actions/checkout@v4
       with:
-        repository: 'micropython/micropython'
+        repository: '${{ github.repository_owner }}/micropython' # Usa tu propio fork de micropython
         fetch-depth: 0
-        submodules: 'recursive'
 
     - name: Checkout Custom Camera Driver
       uses: actions/checkout@v4
       with:
-        path: camera-driver
+        repository: '${{ github.repository_owner }}/micropython-camera-driver' # Tu fork del driver
+        path: micropython-camera-driver # Lo descarga en una carpeta limpia llamada así
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -46,15 +46,12 @@ jobs:
     - name: Install ESP-IDF Tools
       run: |
         cd ports/esp32
-        
-        # 1. Si la carpeta esp-idf está vacía o no existe, la clonamos manualmente a la versión v5.3
+        # Si la carpeta esp-idf está vacía o no existe, la clonamos manualmente a la versión v5.3
         if [ ! -d "esp-idf" ] || [ -z "$(ls -A esp-idf 2>/dev/null)" ]; then
           echo "Clonando ESP-IDF v5.3 de forma manual..."
           rm -rf esp-idf
           git clone -b v5.3 --recursive https://github.com/espressif/esp-idf.git esp-idf
         fi
-        
-        # 2. Instalar las herramientas del compilador
         ./esp-idf/install.sh
 
     - name: Build mpy-cross
@@ -76,17 +73,13 @@ jobs:
 
     - name: Compile Firmware
       run: |
-        # 1. Activamos el entorno de herramientas de Espressif
+        # Activamos el entorno de herramientas de Espressif
         source ports/esp32/esp-idf/export.sh
-        
-        # 2. Creamos un enlace simbólico absoluto dentro de ports/esp32 apuntando a la carpeta de tu driver
-        # De esta forma la ruta "existe" de forma nativa dentro de la jerarquía de compilación de MicroPython
-        ln -s "$GITHUB_WORKSPACE/camera-driver/src" ports/esp32/camera_modules
         
         cd ports/esp32
         
-        # 3. Al pasarle 'camera_modules', CMake lo lee como un subdirectorio propio del puerto y se traga el micropython.cmake sin rechistar
-        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES=camera_modules
+        # Apuntamos USER_C_MODULES directamente a la carpeta del repositorio clonado del driver
+        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES="${{ github.workspace }}/micropython-camera-driver/src"
 
     - name: Upload Firmware Artifacts
       uses: actions/upload-artifact@v4
