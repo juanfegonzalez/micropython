@@ -84,11 +84,17 @@ jobs:
 
     - name: Prepare and Verify Berkeley DB Path
       run: |
-        rm -rf lib/berkeley-db
-        mkdir -p lib/berkeley-db/berkeley-db
-        cp -r btree-temp/. lib/berkeley-db/berkeley-db/
-        echo "=== Verificando que el archivo clave existe ==="
-        ls -la lib/berkeley-db/berkeley-db/README
+        # Eliminamos cualquier intento previo
+        rm -rf lib/berkeley-db-1.xx
+        
+        # Creamos exactamente la ruta que CMake está reclamando en el error
+        mkdir -p lib/berkeley-db-1.xx
+        
+        # Volcamos todo el contenido descargado dentro
+        cp -r btree-temp/. lib/berkeley-db-1.xx/
+        
+        echo "=== Verificando estructura en la ruta que pide CMake ==="
+        ls -la lib/berkeley-db-1.xx/include
 
     # PARE EL ENGRANAJE: Desactivamos la alerta de error fatal en el script de CMake
     - name: Bypass CMake Submodule Check
