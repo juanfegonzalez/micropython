@@ -114,16 +114,15 @@ jobs:
           echo "Validación de py/mkrules.cmake parcheada."
         fi
 
-    - name: Inject Missing Berkeley DB Macros
+    - name: Create Global Patch Header
       run: |
-        PORT_CONFIG="extmod/berkeley-db/berkeley_db_config_port.h"
+        # Creamos una cabecera aislada en la raíz del espacio de trabajo
+        cat << 'EOF' > "${{ github.workspace }}/esp32_fix_macros.h"
+        #ifndef _ESP32_FIX_MACROS_H_
+        #define _ESP32_FIX_MACROS_H_
         
-        if [ -f "$PORT_CONFIG" ]; then
-          echo "=== Inyectando macros CIRCLEQ y Swaps faltantes en $PORT_CONFIG ==="
-          cat << 'EOF' >> "$PORT_CONFIG"
-
-
         #include <sys/types.h>
+        #include <stdint.h>
         
         #ifndef CIRCLEQ_ENTRY
         #define CIRCLEQ_ENTRY(type) \
@@ -142,37 +141,32 @@ jobs:
         #endif
         
         #ifndef M_16_SWAP
-        #define M_16_SWAP(x) (_bswap16(x))
+        #define M_16_SWAP(x) (__builtin_bswap16(x))
         #endif
         
         #ifndef M_32_SWAP
-        #define M_32_SWAP(x) (_bswap32(x))
+        #define M_32_SWAP(x) (__builtin_bswap32(x))
         #endif
         
         #ifndef P_32_SWAP
-        #define P_32_SWAP(x) (*((uint32_t*)(x)) = _bswap32(*((uint32_t*)(x))))
+        #define P_32_SWAP(x) (*((uint32_t*)(x)) = __builtin_bswap32(*((uint32_t*)(x))))
         #endif
-
-        static inline uint16_t _bswap16(uint16_t a) {
-            return (a << 8) | (a >> 8);
-        }
         
-        static inline uint32_t _bswap32(uint32_t a) {
-            return (a << 24) | ((a << 8) & 0x00FF0000) | ((a >> 8) & 0x0000FF00) | (a >> 24);
-        }
+        #endif
         EOF
-          echo "Macros inyectadas correctamente."
-        else
-          echo "Error: No se encontró el archivo $PORT_CONFIG para aplicar el parche."
-          exit 1
-        fi
+        echo "Cabecera de parche global generada con éxito."
 
     - name: Compile Firmware
       run: |
         source ports/esp32/esp-idf/export.sh
         cd ports/esp32
         rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
-        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
+        
+        # Inyectamos de forma forzada la inclusión de nuestra cabecera usando EXTRA_CFLAGS mediante la CLI de make/cmake
+        export EXTRA_CFLAGS="-include ${{ github.workspace }}/esp32_fix_macros.h"
+        export EXTRA_CXXFLAGS="-include ${{ github.workspace }}/esp32_fix_macros.h"
+        
+        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT EXTRA_CFLAGS="$EXTRA_CFLAGS" EXTRA_CXXFLAGS="$EXTRA_CXXFLAGS"
 
     - name: Upload Firmware Artifacts
       uses: actions/upload-artifact@v4
