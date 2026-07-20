@@ -26,14 +26,12 @@ jobs:
         repository: '${{ github.repository_owner }}/micropython-camera-driver'
         path: micropython-camera-driver
 
-    # [OK] Traemos la dependencia de Berkeley DB
     - name: Bring Berkeley DB Dependency (BTree)
       uses: actions/checkout@v4
       with:
         repository: 'pfalcon/berkeley-db-1.xx'
         path: btree-temp
 
-    # [NUEVO] Traemos la dependencia oficial micropython-lib para rellenar la carpeta
     - name: Bring MicroPython Lib Dependency
       uses: actions/checkout@v4
       with:
@@ -90,7 +88,6 @@ jobs:
         mkdir -p "${{ github.workspace }}/ports/esp32/main/camera_modules"
         cp -r "${{ github.workspace }}/micropython-camera-driver/src/." "${{ github.workspace }}/ports/esp32/main/camera_modules"
 
-    # [OK] Mapeamos Berkeley DB a la ruta exacta del error anterior
     - name: Prepare and Verify Berkeley DB Path
       run: |
         rm -rf lib/berkeley-db-1.xx
@@ -99,7 +96,6 @@ jobs:
         echo "=== Verificando estructura de berkeley-db ==="
         ls -la lib/berkeley-db-1.xx/include
 
-    # [MODIFICADO] Parcheamos las comprobaciones de Git de AMBOS archivos .cmake
     - name: Bypass CMake Submodule Checks
       run: |
         # 1. Bypass para berkeley-db en extmod.cmake
@@ -110,12 +106,65 @@ jobs:
           echo "Validación de extmod.cmake parcheada."
         fi
         
-        # 2. Bypass para micropython-lib en py/mkrules.cmake (Línea 269)
+        # 2. Bypass para micropython-lib en py/mkrules.cmake
         if [ -f "py/mkrules.cmake" ]; then
           sed -i 's/message(FATAL_ERROR.*micropython-lib.*)/message(STATUS "Bypassed micropython-lib error")/g' py/mkrules.cmake
           sed -i 's/message(SEND_ERROR.*micropython-lib.*)/message(STATUS "Bypassed micropython-lib error")/g' py/mkrules.cmake
           sed -i '269s/message(FATAL_ERROR/message(STATUS/g' py/mkrules.cmake 2>/dev/null || true
           echo "Validación de py/mkrules.cmake parcheada."
+        fi
+
+    - name: Inject Missing Berkeley DB Macros
+      run: |
+        PORT_CONFIG="extmod/berkeley-db/berkeley_db_config_port.h"
+        
+        if [ -f "$PORT_CONFIG" ]; then
+          echo "=== Inyectando macros CIRCLEQ y Swaps faltantes en $PORT_CONFIG ==="
+          cat << 'EOF' >> "$PORT_CONFIG"
+
+
+        #include <sys/types.h>
+        
+        #ifndef CIRCLEQ_ENTRY
+        #define CIRCLEQ_ENTRY(type) \
+        struct { \
+                struct type *cqe_next; \
+                struct type *cqe_prev; \
+        }
+        #endif
+
+        #ifndef CIRCLEQ_HEAD
+        #define CIRCLEQ_HEAD(name, type) \
+        struct name { \
+                struct type *cqh_first; \
+                struct type *cqh_last; \
+        }
+        #endif
+        
+        #ifndef M_16_SWAP
+        #define M_16_SWAP(x) (_bswap16(x))
+        #endif
+        
+        #ifndef M_32_SWAP
+        #define M_32_SWAP(x) (_bswap32(x))
+        #endif
+        
+        #ifndef P_32_SWAP
+        #define P_32_SWAP(x) (*((uint32_t*)(x)) = _bswap32(*((uint32_t*)(x))))
+        #endif
+
+        static inline uint16_t _bswap16(uint16_t a) {
+            return (a << 8) | (a >> 8);
+        }
+        
+        static inline uint32_t _bswap32(uint32_t a) {
+            return (a << 24) | ((a << 8) & 0x00FF0000) | ((a >> 8) & 0x0000FF00) | (a >> 24);
+        }
+        EOF
+          echo "Macros inyectadas correctamente."
+        else
+          echo "Error: No se encontró el archivo $PORT_CONFIG para aplicar el parche."
+          exit 1
         fi
 
     - name: Compile Firmware
