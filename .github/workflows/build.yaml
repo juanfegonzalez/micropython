@@ -101,7 +101,7 @@ jobs:
           sed -i 's/message(SEND_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
           sed -i 's/message(FATAL_ERROR/message(STATUS/g' extmod/extmod.cmake 2>/dev/null || true
           
-          echo "=== Creando cabecera de parche completa para CIRCLEQ ==="
+          echo "=== Creando cabecera de parche completa para CIRCLEQ y SWAP ==="
           echo "#ifndef _ESP32_FIX_MACROS_H_" > "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#define _ESP32_FIX_MACROS_H_" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#include <sys/types.h>" >> "${{ github.workspace }}/esp32_fix_macros.h"
@@ -144,20 +144,28 @@ jobs:
           ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/mpool.h" extmod/berkeley-db/mpool.h
           cp -rs "${{ github.workspace }}/lib/berkeley-db-1.xx/btree/." extmod/berkeley-db/
 
-          echo "=== Inyectando directiva de inclusión quirúrgica en modbtree.c ==="
+          echo "=== Inyección directa en el núcleo de berkeley-db ==="
+          # Inyectamos el fix al principio de compat.h para que lo herede TODO el submódulo berkeley-db
+          if [ -f "lib/berkeley-db-1.xx/include/compat.h" ]; then
+            sed -i '1i #include "esp32_fix_macros.h"' lib/berkeley-db-1.xx/include/compat.h
+          fi
+          if [ -f "lib/berkeley-db-1.xx/include/db.h" ]; then
+            sed -i '1i #include "esp32_fix_macros.h"' lib/berkeley-db-1.xx/include/db.h
+          fi
+
+          echo "=== Inyectando directiva quirúrgica en modbtree.c ==="
           if [ -f "extmod/modbtree.c" ]; then
-            # Añadimos la inclusión explícita del fix al principio del archivo
             sed -i '1i #include "esp32_fix_macros.h"' extmod/modbtree.c
             sed -i '1i #include "lib/berkeley-db-1.xx/include/db.h"' extmod/modbtree.c
           fi
 
-          echo "=== Añadiendo directorios de inclusión a nivel global de CMake ==="
+          echo "=== Añadiendo directorios de inclusión globales en CMake ==="
           echo "include_directories(\"${{ github.workspace }}\")" >> extmod/extmod.cmake
           echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx\")" >> extmod/extmod.cmake
           echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
           echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
 
-          echo "Parche directo sobre C completado."
+          echo "Parche global para berkeley-db completado con éxito."
         fi
         
         # 2. Bypass para micropython-lib en py/mkrules.cmake
