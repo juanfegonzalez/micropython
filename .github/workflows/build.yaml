@@ -101,22 +101,37 @@ jobs:
           sed -i 's/message(SEND_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
           sed -i '116s/message(FATAL_ERROR/message(STATUS/g' extmod/extmod.cmake 2>/dev/null || true
           
-          echo "=== Forzando inyección de macros de compatibilidad BSD a nivel de compilación CMake ==="
-          
-          # Inyectamos línea por línea de manera segura sin usar here-documents (EOF)
+          echo "=== Creando cabecera de parche aislada ==="
+          # Generamos un archivo de cabecera limpio en el workspace
+          echo "#ifndef _ESP32_FIX_MACROS_H_" > "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#define _ESP32_FIX_MACROS_H_" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#include <sys/types.h>" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#include <stdint.h>" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#ifndef CIRCLEQ_ENTRY" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#define CIRCLEQ_ENTRY(type) struct { struct type *cqe_next; struct type *cqe_prev; }" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#ifndef CIRCLEQ_HEAD" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#define CIRCLEQ_HEAD(name, type) struct name { struct type *cqh_first; struct type *cqh_last; }" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#ifndef M_16_SWAP" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#define M_16_SWAP(x) (__builtin_bswap16(x))" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#ifndef M_32_SWAP" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#define M_32_SWAP(x) (__builtin_bswap32(x))" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#ifndef P_32_SWAP" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#define P_32_SWAP(x) (*((uint32_t*)(x)) = __builtin_bswap32(*((uint32_t*)(x))))" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
+          echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
+
+          echo "=== Inyectando flag de inclusión forzada en CMake ==="
+          # En lugar de meter -D estructuradas en la CLI, forzamos al target a incluir nuestra cabecera limpiamente
           echo "" >> extmod/extmod.cmake
-          echo "# Inyección forzada de compatibilidad para Newlib / ESP32 en modulo btree" >> extmod/extmod.cmake
           echo "if(TARGET micropy_extmod_btree)" >> extmod/extmod.cmake
-          echo "    target_compile_definitions(micropy_extmod_btree PRIVATE" >> extmod/extmod.cmake
-          echo '        "CIRCLEQ_ENTRY(type)=struct { struct type *cqe_next; struct type *cqe_prev; }"' >> extmod/extmod.cmake
-          echo '        "CIRCLEQ_HEAD(name, type)=struct name { struct type *cqh_first; struct type *cqh_last; }"' >> extmod/extmod.cmake
-          echo '        "M_16_SWAP(x)=__builtin_bswap16(x)"' >> extmod/extmod.cmake
-          echo '        "M_32_SWAP(x)=__builtin_bswap32(x)"' >> extmod/extmod.cmake
-          echo '        "P_32_SWAP(x)=(*((uint32_t*)(x)) = __builtin_bswap32(*((uint32_t*)(x))))"' >> extmod/extmod.cmake
-          echo "    )" >> extmod/extmod.cmake
+          echo "    target_compile_options(micropy_extmod_btree PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
           echo "endif()" >> extmod/extmod.cmake
           
-          echo "Validación e inyección de compilación en extmod.cmake completada."
+          echo "Validación e inyección en extmod.cmake completada con éxito."
         fi
         
         # 2. Bypass para micropython-lib en py/mkrules.cmake
