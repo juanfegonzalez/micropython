@@ -139,22 +139,20 @@ jobs:
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
 
           echo "=== Parcheando inclusiones relativas directamente en modbtree.c ==="
-          # Quitamos el prefijo 'berkeley-db/' porque las cabeceras ya se inyectan en el include path globalmente
           if [ -f "extmod/modbtree.c" ]; then
             sed -i 's#berkeley-db/db.h#db.h#g' extmod/modbtree.c
             sed -i 's#berkeley-db/btree.h#btree.h#g' extmod/modbtree.c
           fi
 
-          echo "=== Inyectando parches forzados en CMake ==="
+          echo "=== Inyectando banderas e incluye paths directamente en el compilador principal ==="
           echo "" >> extmod/extmod.cmake
-          echo "if(TARGET micropy_extmod_btree)" >> extmod/extmod.cmake
-          echo "    target_compile_options(micropy_extmod_btree PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
-          echo "endif()" >> extmod/extmod.cmake
           echo "if(TARGET __idf_main)" >> extmod/extmod.cmake
           echo "    target_compile_options(__idf_main PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
+          # Forzamos la ruta real al pool de includes que hereda obligatoriamente main
+          echo "    target_include_directories(__idf_main PUBLIC \"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
           echo "endif()" >> extmod/extmod.cmake
           
-          echo "Parche directo sobre fuentes completado."
+          echo "Parche de inyección forzada y scope público completado."
         fi
         
         # 2. Bypass para micropython-lib en py/mkrules.cmake
