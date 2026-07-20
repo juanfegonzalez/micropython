@@ -99,7 +99,7 @@ jobs:
         if [ -f "extmod/extmod.cmake" ]; then
           sed -i 's/message(FATAL_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
           sed -i 's/message(SEND_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
-          sed -i '116s/message(FATAL_ERROR/message(STATUS/g' extmod/extmod.cmake 2>/dev/null || true
+          sed -i 's/message(FATAL_ERROR/message(STATUS/g' extmod/extmod.cmake 2>/dev/null || true
           
           echo "=== Creando cabecera de parche completa para CIRCLEQ ==="
           echo "#ifndef _ESP32_FIX_MACROS_H_" > "${{ github.workspace }}/esp32_fix_macros.h"
@@ -144,22 +144,25 @@ jobs:
             sed -i 's#berkeley-db/btree.h#btree.h#g' extmod/modbtree.c
           fi
 
-          echo "=== Inyectando banderas e incluye paths directamente en el compilador principal ==="
+          echo "=== Inyectando banderas obligatorias en el core y en la librería btree ==="
           echo "" >> extmod/extmod.cmake
+          echo "if(TARGET micropy_extmod_btree)" >> extmod/extmod.cmake
+          echo "    target_compile_options(micropy_extmod_btree PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
+          echo "    target_include_directories(micropy_extmod_btree PUBLIC \"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
+          echo "endif()" >> extmod/extmod.cmake
           echo "if(TARGET __idf_main)" >> extmod/extmod.cmake
           echo "    target_compile_options(__idf_main PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
-          # Forzamos la ruta real al pool de includes que hereda obligatoriamente main
           echo "    target_include_directories(__idf_main PUBLIC \"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
           echo "endif()" >> extmod/extmod.cmake
           
-          echo "Parche de inyección forzada y scope público completado."
+          echo "Parche de inyección forzada para targets múltiples completado."
         fi
         
         # 2. Bypass para micropython-lib en py/mkrules.cmake
         if [ -f "py/mkrules.cmake" ]; then
           sed -i 's/message(FATAL_ERROR.*micropython-lib.*)/message(STATUS "Bypassed micropython-lib error")/g' py/mkrules.cmake
           sed -i 's/message(SEND_ERROR.*micropython-lib.*)/message(STATUS "Bypassed micropython-lib error")/g' py/mkrules.cmake
-          sed -i '269s/message(FATAL_ERROR/message(STATUS/g' py/mkrules.cmake 2>/dev/null || true
+          sed -i 's/message(FATAL_ERROR/message(STATUS/g' py/mkrules.cmake 2>/dev/null || true
           echo "Validación de py/mkrules.cmake parcheada."
         fi
         
