@@ -71,7 +71,6 @@ jobs:
 
     - name: Patch Framework (Fix Bootloader & JPEG Conflict)
       run: |
-        # Evita que el componente esp_jpeg se intente compilar dentro del entorno limitado del Bootloader
         find . -name "CMakeLists.txt" | grep "esp_jpeg" | xargs -I {} sh -c '
           if ! grep -q "BOOTLOADER_BUILD" {}; then
             echo "if(NOT BOOTLOADER_BUILD)" > {}.tmp
@@ -93,17 +92,31 @@ jobs:
         rm -rf lib/berkeley-db-1.xx
         mkdir -p lib/berkeley-db-1.xx
         cp -r btree-temp/. lib/berkeley-db-1.xx/
-        echo "=== Verificando estructura de berkeley-db ==="
-        ls -la lib/berkeley-db-1.xx/include
 
-    - name: Bypass CMake Submodule Checks
+    - name: Bypass CMake Submodule Checks and Force Compile Flags
       run: |
         # 1. Bypass para berkeley-db en extmod.cmake
         if [ -f "extmod/extmod.cmake" ]; then
           sed -i 's/message(FATAL_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
           sed -i 's/message(SEND_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
           sed -i '116s/message(FATAL_ERROR/message(STATUS/g' extmod/extmod.cmake 2>/dev/null || true
-          echo "Validación de extmod.cmake parcheada."
+          
+          # Inyectamos las macros ausentes a nivel de CMake Target para asegurar que Ninja las compile directamente
+          echo "=== Forzando inyección de macros de compatibilidad BSD a nivel de compilación CMake ==="
+          cat << 'EOF' >> extmod/extmod.cmake
+
+          # Inyección forzada de compatibilidad para Newlib / ESP32 en modulo btree
+          if(TARGET micropy_extmod_btree)
+              target_compile_definitions(micropy_extmod_btree PRIVATE
+                  "CIRCLEQ_ENTRY(type)=struct { struct type *cqe_next; struct type *cqe_prev; }"
+                  "CIRCLEQ_HEAD(name, type)=struct name { struct type *cqh_first; struct type *cqh_last; }"
+                  "M_16_SWAP(x)=__builtin_bswap16(x)"
+                  "M_32_SWAP(x)=__builtin_bswap32(x)"
+                  "P_32_SWAP(x)=(*((uint32_t*)(x)) = __builtin_bswap32(*((uint32_t*)(x))))"
+              )
+          endif()
+          EOF
+          echo "Validación e inyección de compilación en extmod.cmake completada."
         fi
         
         # 2. Bypass para micropython-lib en py/mkrules.cmake
@@ -114,59 +127,12 @@ jobs:
           echo "Validación de py/mkrules.cmake parcheada."
         fi
 
-    - name: Create Global Patch Header
-      run: |
-        # Creamos una cabecera aislada en la raíz del espacio de trabajo
-        cat << 'EOF' > "${{ github.workspace }}/esp32_fix_macros.h"
-        #ifndef _ESP32_FIX_MACROS_H_
-        #define _ESP32_FIX_MACROS_H_
-        
-        #include <sys/types.h>
-        #include <stdint.h>
-        
-        #ifndef CIRCLEQ_ENTRY
-        #define CIRCLEQ_ENTRY(type) \
-        struct { \
-                struct type *cqe_next; \
-                struct type *cqe_prev; \
-        }
-        #endif
-
-        #ifndef CIRCLEQ_HEAD
-        #define CIRCLEQ_HEAD(name, type) \
-        struct name { \
-                struct type *cqh_first; \
-                struct type *cqh_last; \
-        }
-        #endif
-        
-        #ifndef M_16_SWAP
-        #define M_16_SWAP(x) (__builtin_bswap16(x))
-        #endif
-        
-        #ifndef M_32_SWAP
-        #define M_32_SWAP(x) (__builtin_bswap32(x))
-        #endif
-        
-        #ifndef P_32_SWAP
-        #define P_32_SWAP(x) (*((uint32_t*)(x)) = __builtin_bswap32(*((uint32_t*)(x))))
-        #endif
-        
-        #endif
-        EOF
-        echo "Cabecera de parche global generada con éxito."
-
     - name: Compile Firmware
       run: |
         source ports/esp32/esp-idf/export.sh
         cd ports/esp32
         rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
-        
-        # Inyectamos de forma forzada la inclusión de nuestra cabecera usando EXTRA_CFLAGS mediante la CLI de make/cmake
-        export EXTRA_CFLAGS="-include ${{ github.workspace }}/esp32_fix_macros.h"
-        export EXTRA_CXXFLAGS="-include ${{ github.workspace }}/esp32_fix_macros.h"
-        
-        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT EXTRA_CFLAGS="$EXTRA_CFLAGS" EXTRA_CXXFLAGS="$EXTRA_CXXFLAGS"
+        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
 
     - name: Upload Firmware Artifacts
       uses: actions/upload-artifact@v4
