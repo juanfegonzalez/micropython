@@ -138,28 +138,22 @@ jobs:
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
 
-          echo "=== Parcheando inclusiones relativas directamente en modbtree.c ==="
-          if [ -f "extmod/modbtree.c" ]; then
-            sed -i 's#berkeley-db/db.h#db.h#g' extmod/modbtree.c
-            sed -i 's#berkeley-db/btree.h#btree.h#g' extmod/modbtree.c
-          fi
+          echo "=== Creando enlaces simbólicos de compatibilidad para rutas de headers ==="
+          # En lugar de cambiar modbtree.c, hacemos que la ruta interna original funcione mapeando las carpetas
+          mkdir -p extmod/berkeley-db
+          ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/db.h" extmod/berkeley-db/db.h
+          ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/btree/btree.h" extmod/berkeley-db/btree.h
 
-          echo "=== Inyectando banderas obligatorias en el core y en la librería btree ==="
+          echo "=== Inyectando banderas obligatorias de macros mediante opciones globales de CMake ==="
           echo "" >> extmod/extmod.cmake
           echo "if(TARGET micropy_extmod_btree)" >> extmod/extmod.cmake
           echo "    target_compile_options(micropy_extmod_btree PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
-          echo "    target_include_directories(micropy_extmod_btree PUBLIC \"${{ github.workspace }}/lib/berkeley-db-1.xx\")" >> extmod/extmod.cmake
-          echo "    target_include_directories(micropy_extmod_btree PUBLIC \"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
-          echo "    target_include_directories(micropy_extmod_btree PUBLIC \"${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
-          echo "endif()" >> extmod/extmod.cmake
-          echo "if(TARGET __idf_main)" >> extmod/extmod.cmake
-          echo "    target_compile_options(__idf_main PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
-          echo "    target_include_directories(__idf_main PUBLIC \"${{ github.workspace }}/lib/berkeley-db-1.xx\")" >> extmod/extmod.cmake
-          echo "    target_include_directories(__idf_main PUBLIC \"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
-          echo "    target_include_directories(__idf_main PUBLIC \"${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
           echo "endif()" >> extmod/extmod.cmake
           
-          echo "Parche de rutas include y macros para targets múltiples completado."
+          # Forzamos la macro global en el puerto de compilación para asegurar que todo archivo herede el fix
+          echo "add_compile_options(\"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
+          
+          echo "Parche estructurado por enlaces simbólicos completado."
         fi
         
         # 2. Bypass para micropython-lib en py/mkrules.cmake
