@@ -107,7 +107,6 @@ jobs:
           echo "#include <sys/types.h>" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#include <stdint.h>" >> "${{ github.workspace }}/esp32_fix_macros.h"
           
-          # Estructuras base
           echo "#ifndef CIRCLEQ_ENTRY" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#define CIRCLEQ_ENTRY(type) struct { struct type *cqe_next; struct type *cqe_prev; }" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
@@ -115,7 +114,6 @@ jobs:
           echo "#define CIRCLEQ_HEAD(name, type) struct name { struct type *cqh_first; struct type *cqh_last; }" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
           
-          # Funciones de manipulación de colas circulares requeridas por mpool.c
           echo "#ifndef CIRCLEQ_INIT" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#define CIRCLEQ_INIT(head) do { (head)->cqh_first = (void *)(head); (head)->cqh_last = (void *)(head); } while (0)" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
@@ -129,7 +127,6 @@ jobs:
           echo "#define CIRCLEQ_REMOVE(head, elm, field) do { if ((elm)->field.cqe_next == (void *)(head)) (head)->cqh_last = (elm)->field.cqe_prev; else (elm)->field.cqe_next->field.cqe_prev = (elm)->field.cqe_prev; if ((elm)->field.cqe_prev == (void *)(head)) (head)->cqh_first = (elm)->field.cqe_next; else (elm)->field.cqe_prev->field.cqe_next = (elm)->field.cqe_next; } while (0)" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
           
-          # Macros de swap de bytes estándar de Berkeley DB
           echo "#ifndef M_16_SWAP" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#define M_16_SWAP(x) (__builtin_bswap16(x))" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
@@ -141,18 +138,27 @@ jobs:
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
 
-          echo "=== Inyectando flag de inclusión forzada en CMake ==="
+          echo "=== Creando estructura física para búsquedas relativas de berkeley-db ==="
+          # Esto asegura que #include "berkeley-db/xxx.h" funcione siempre mapeando la carpeta real
+          rm -rf extmod/berkeley-db
+          mkdir -p extmod/berkeley-db
+          ln -sf ../../lib/berkeley-db-1.xx/include/db.h extmod/berkeley-db/db.h
+          ln -sf ../../lib/berkeley-db-1.xx/include/btree.h extmod/berkeley-db/btree.h
+          ln -sf ../../lib/berkeley-db-1.xx/include/compat.h extmod/berkeley-db/compat.h
+          ln -sf ../../lib/berkeley-db-1.xx/include/mpool.h extmod/berkeley-db/mpool.h
+
+          echo "=== Inyectando parches globales de CMake ==="
+          # Forzamos las opciones de cabecera e inclusión tanto en la extensión como en el núcleo principal de la app de la IDF
           echo "" >> extmod/extmod.cmake
           echo "if(TARGET micropy_extmod_btree)" >> extmod/extmod.cmake
           echo "    target_compile_options(micropy_extmod_btree PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
           echo "endif()" >> extmod/extmod.cmake
+          echo "if(TARGET __idf_main)" >> extmod/extmod.cmake
+          echo "    target_compile_options(__idf_main PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
+          echo "    target_include_directories(__idf_main PRIVATE \"\${MICROPY_DIR}/extmod\")" >> extmod/extmod.cmake
+          echo "endif()" >> extmod/extmod.cmake
           
-          echo "=== Creando enlace simbólico virtual para el generador QSTR ==="
-          # Esto resuelve el error fatal de 'berkeley-db/db.h: No such file or directory' en modbtree.c
-          mkdir -p extmod/berkeley-db
-          ln -sf ../../lib/berkeley-db-1.xx/include/db.h extmod/berkeley-db/db.h
-          
-          echo "Validación, mapeo QSTR e inyección en extmod.cmake completados."
+          echo "Validación, mapeo global de cabeceras e inyección en extmod.cmake completados."
         fi
         
         # 2. Bypass para micropython-lib en py/mkrules.cmake
@@ -162,7 +168,7 @@ jobs:
           sed -i '269s/message(FATAL_ERROR/message(STATUS/g' py/mkrules.cmake 2>/dev/null || true
           echo "Validación de py/mkrules.cmake parcheada."
         fi
-
+        
     - name: Compile Firmware
       run: |
         source ports/esp32/esp-idf/export.sh
