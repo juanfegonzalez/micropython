@@ -138,26 +138,26 @@ jobs:
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
 
-          echo "=== Creando estructura mapeada de compatibilidad en extmod ==="
+          echo "=== Mapeando archivos de cabecera en extmod/berkeley-db ==="
           mkdir -p extmod/berkeley-db
-          # Enlazamos los headers críticos individuales en el raíz esperado por MicroPython
           ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/db.h" extmod/berkeley-db/db.h
-          
-          # Enlazamos recursivamente todo el contenido de btree/ dentro de extmod/berkeley-db/
-          # Esto resolverá btree.h, extern.h y cualquier otra dependencia interna de esa carpeta
+          ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/mpool.h" extmod/berkeley-db/mpool.h
           cp -rs "${{ github.workspace }}/lib/berkeley-db-1.xx/btree/." extmod/berkeley-db/
 
-          echo "=== Inyectando banderas específicas por archivo evitando contaminación BLE ==="
-          echo "" >> extmod/extmod.cmake
-          echo "if(TARGET micropy_extmod_btree)" >> extmod/extmod.cmake
-          echo "    target_compile_options(micropy_extmod_btree PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
-          echo "endif()" >> extmod/extmod.cmake
-          
-          # En lugar de add_compile_options (que ensucia NimBLE), aplicamos el flag de macros
-          # única y exclusivamente al archivo modbtree.c de manera quirúrgica usando propiedades de CMake
-          echo "set_source_files_properties(\${MICROPY_DIR}/extmod/modbtree.c PROPERTIES COMPILE_FLAGS \"-include ${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
-          
-          echo "Parche enfocado a targets aislados completado con éxito."
+          echo "=== Inyectando directiva de inclusión quirúrgica en modbtree.c ==="
+          if [ -f "extmod/modbtree.c" ]; then
+            # Añadimos la inclusión explícita del fix al principio del archivo
+            sed -i '1i #include "esp32_fix_macros.h"' extmod/modbtree.c
+            sed -i '1i #include "lib/berkeley-db-1.xx/include/db.h"' extmod/modbtree.c
+          fi
+
+          echo "=== Añadiendo directorios de inclusión a nivel global de CMake ==="
+          echo "include_directories(\"${{ github.workspace }}\")" >> extmod/extmod.cmake
+          echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx\")" >> extmod/extmod.cmake
+          echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
+          echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
+
+          echo "Parche directo sobre C completado."
         fi
         
         # 2. Bypass para micropython-lib en py/mkrules.cmake
