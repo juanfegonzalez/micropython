@@ -138,25 +138,25 @@ jobs:
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
           echo "#endif" >> "${{ github.workspace }}/esp32_fix_macros.h"
 
-          echo "=== Creando entorno de inclusión absoluto para berkeley-db ==="
-          # Construimos un árbol limpio e incontestable en el directorio del workspace
-          mkdir -p "${{ github.workspace }}/include_vfs/berkeley-db"
-          ln -sf "${{ github.workspace }}/lib/berkeley-db-1.xx/include/db.h" "${{ github.workspace }}/include_vfs/berkeley-db/db.h"
-          ln -sf "${{ github.workspace }}/lib/berkeley-db-1.xx/include/btree.h" "${{ github.workspace }}/include_vfs/berkeley-db/btree.h"
-          ln -sf "${{ github.workspace }}/lib/berkeley-db-1.xx/include/compat.h" "${{ github.workspace }}/include_vfs/berkeley-db/compat.h"
-          ln -sf "${{ github.workspace }}/lib/berkeley-db-1.xx/include/mpool.h" "${{ github.workspace }}/include_vfs/berkeley-db/mpool.h"
+          echo "=== Creando estructura física berkeley-db en la raíz de búsqueda ==="
+          # Al estar en la raíz de MicroPython, -I. resolverá automáticamente "berkeley-db/xxx.h"
+          rm -rf extmod/berkeley-db berkeley-db
+          mkdir -p berkeley-db
+          ln -sf "${{ github.workspace }}/lib/berkeley-db-1.xx/include/db.h" berkeley-db/db.h
+          ln -sf "${{ github.workspace }}/lib/berkeley-db-1.xx/include/btree.h" berkeley-db/btree.h
+          ln -sf "${{ github.workspace }}/lib/berkeley-db-1.xx/include/compat.h" berkeley-db/compat.h
+          ln -sf "${{ github.workspace }}/lib/berkeley-db-1.xx/include/mpool.h" berkeley-db/mpool.h
 
-          echo "=== Inyectando parches globales de CMake ==="
+          echo "=== Inyectando parches forzados en CMake ==="
           echo "" >> extmod/extmod.cmake
           echo "if(TARGET micropy_extmod_btree)" >> extmod/extmod.cmake
           echo "    target_compile_options(micropy_extmod_btree PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
           echo "endif()" >> extmod/extmod.cmake
           echo "if(TARGET __idf_main)" >> extmod/extmod.cmake
           echo "    target_compile_options(__idf_main PRIVATE \"-include\" \"${{ github.workspace }}/esp32_fix_macros.h\")" >> extmod/extmod.cmake
-          echo "    target_include_directories(__idf_main PRIVATE \"${{ github.workspace }}/include_vfs\")" >> extmod/extmod.cmake
           echo "endif()" >> extmod/extmod.cmake
           
-          echo "Validación, entorno de inclusión absoluto e inyección en extmod.cmake completados."
+          echo "Mapeo nativo de cabeceras en raíz completado."
         fi
         
         # 2. Bypass para micropython-lib en py/mkrules.cmake
