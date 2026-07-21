@@ -1,0 +1,5 @@
+# Flash 8MB + partición factory 3MB (camera + microlite no caben en 0x1F0000).
+# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-8MiB-ai.csv"
