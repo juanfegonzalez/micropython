@@ -72,6 +72,7 @@ jobs:
         ML_CMAKE: ${{ github.workspace }}/tflm_mp/micropython-modules/microlite/micropython.cmake
         ML_DIR: ${{ github.workspace }}/tflm_mp/micropython-modules/microlite
         ML_PATCH: ${{ github.workspace }}/firmware/patches/tensorflow-microlite.c
+        ESP_NN_KERNELS: ${{ github.workspace }}/tflm_mp/tflm_esp_kernels/components/tflite-lib/tensorflow/lite/micro/kernels/esp_nn
       run: |
         set -euo pipefail
 
@@ -129,6 +130,29 @@ jobs:
             )
         ml.write_text(ml_text)
         print(f"patched microlite cmake (O removed={n_o2+n_o3}, audio_frontend removed={n_af})")
+
+        # GCC/C++20 (IDF 5.5): no mezclar designators con literales en data_dims_t
+        kernels = Path(os.environ["ESP_NN_KERNELS"])
+        total = 0
+        for p in kernels.glob("*.cc"):
+            t = p.read_text()
+            t2, n1 = re.subn(
+                r"\.channels\s*=\s*([^,\}]+),\s*(\d+)\b",
+                r".channels = \1, .extra = \2",
+                t,
+            )
+            t2, n2 = re.subn(
+                r"\{\s*\.width\s*=\s*([^,]+),\s*\.height\s*=\s*([^,]+),\s*0,\s*0\s*\}",
+                r"{.width = \1, .height = \2, .channels = 0, .extra = 0}",
+                t2,
+            )
+            if n1 or n2:
+                p.write_text(t2)
+                print(f"patched designated inits: {p.name} ({n1}+{n2})")
+                total += n1 + n2
+        if total < 1:
+            raise SystemExit("esp_nn designated-init patch found nothing")
+        print(f"esp_nn designated-init fixes: {total}")
         PY
 
         ! grep -q 'MICROPY_ROM_TEXT_COMPRESSION=0' "$CAM_CMAKE"
@@ -137,6 +161,8 @@ jobs:
         ! grep -q '\bSTATIC\b' "$ML_DIR/tensorflow-microlite.c"
         grep -q 'MP_DEFINE_CONST_OBJ_TYPE' "$ML_DIR/tensorflow-microlite.c"
         grep -q 'COMPILE_LANGUAGE:CXX>:-fno-rtti' "$ML_CMAKE"
+        ! grep -E -q '\.channels = .*, [0-9]' "$ESP_NN_KERNELS/conv.cc"
+        ! grep -E -q '\.channels = .*, [0-9]' "$ESP_NN_KERNELS/depthwise_conv.cc"
 
     - name: Set up Python
       uses: actions/setup-python@v5
