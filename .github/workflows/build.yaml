@@ -163,19 +163,21 @@ jobs:
           # Define macro stub para sigprocmask
           sed -i '1i #ifndef sigprocmask\n#define sigprocmask(how, set, oset) (0)\n#endif' "$BT_OPEN_FILE"
 
-          # Parchea la firma a 4 parametros
-          python3 -c '
+          # Parchea la firma usando python via heredoc (sin problemas de sangrado)
+          python3 - << 'EOF'
           import re
-          with open("lib/berkeley-db-1.xx/btree/bt_open.c", "r") as f:
+          
+          file_path = "lib/berkeley-db-1.xx/btree/bt_open.c"
+          with open(file_path, "r") as f:
               content = f.read()
           
           pattern = r"__bt_open\s*\([^)]*\)\s*const\s+char\s*\*fname;[\s\S]*?\{\s*"
           replacement = "__bt_open(const void *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int dflags)\n{\n    int flags = 0, mode = 0;\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n"
           
           new_content = re.sub(pattern, replacement, content)
-          with open("lib/berkeley-db-1.xx/btree/bt_open.c", "w") as f:
+          with open(file_path, "w") as f:
               f.write(new_content)
-          '
+          EOF
         fi
 
         # 2. Bypass para micropython-lib en py/mkrules.cmake
