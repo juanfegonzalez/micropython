@@ -163,21 +163,8 @@ jobs:
           # Define macro stub para sigprocmask
           sed -i '1i #ifndef sigprocmask\n#define sigprocmask(how, set, oset) (0)\n#endif' "$BT_OPEN_FILE"
 
-          # Parchea la firma usando python via heredoc (sin problemas de sangrado)
-          python3 - << 'EOF'
-          import re
-          
-          file_path = "lib/berkeley-db-1.xx/btree/bt_open.c"
-          with open(file_path, "r") as f:
-              content = f.read()
-          
-          pattern = r"__bt_open\s*\([^)]*\)\s*const\s+char\s*\*fname;[\s\S]*?\{\s*"
-          replacement = "__bt_open(const void *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int dflags)\n{\n    int flags = 0, mode = 0;\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n"
-          
-          new_content = re.sub(pattern, replacement, content)
-          with open(file_path, "w") as f:
-              f.write(new_content)
-          EOF
+          # Ejecuta la sustitucion con Python de forma segura sin heredocs
+          python3 -c "import re; p = '$BT_OPEN_FILE'; c = open(p).read(); open(p, 'w').write(re.sub(r'__bt_open\s*\([^)]*\)\s*const\s+char\s*\*fname;[\s\S]*?\{\s*', '__bt_open(const void *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int dflags)\n{\n    int flags = 0, mode = 0;\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n', c))"
         fi
 
         # 2. Bypass para micropython-lib en py/mkrules.cmake
@@ -186,6 +173,7 @@ jobs:
           sed -i 's/message(SEND_ERROR.*micropython-lib.*)/message(STATUS "Bypassed micropython-lib error")/g' py/mkrules.cmake
           sed -i 's/message(FATAL_ERROR/message(STATUS/g' py/mkrules.cmake 2>/dev/null || true
         fi
+    
         
     - name: Compile Firmware
       run: |
