@@ -1,7 +1,7 @@
-name: Build ESP32-S3-EYE Camera Firmware
+name: Build ESP32-S3-EYE Camera + AI Firmware
 
-# Firmware MicroPython + módulo camera (API moderna) para ESP32-S3-EYE.
-# Artefacto: micropython-esp32s3-eye-camera / firmware.bin
+# MicroPython + camera (API moderna) + microlite (TFLite Micro).
+# Artefacto: micropython-esp32s3-eye-camera-ai / firmware.bin
 
 on:
   push:
@@ -28,13 +28,28 @@ jobs:
         fetch-depth: 1
         submodules: recursive
 
-    # Driver MicroPython moderno (import camera / from camera import Camera)
-    # Incluye submodule esp32-camera y evita el stack viejo de lemariva.
     - name: Checkout micropython-camera-API
       uses: actions/checkout@v4
       with:
         repository: cnadler86/micropython-camera-API
         path: mp_camera_api
+        submodules: recursive
+
+    # Binding MicroPython ↔ TFLite Micro (módulo `microlite`)
+    - name: Checkout tensorflow-micropython-examples
+      uses: actions/checkout@v4
+      with:
+        repository: mocleiri/tensorflow-micropython-examples
+        path: tflm_mp
+        fetch-depth: 1
+
+    - name: Checkout tflm_esp_kernels (pinned by mocleiri)
+      uses: actions/checkout@v4
+      with:
+        repository: espressif/tflite-micro-esp-examples
+        path: tflm_mp/tflm_esp_kernels
+        # Commit fijado en el submodule de mocleiri (estructura components/tflite-lib)
+        ref: 2690c7a7a27164eea6bd7d38e6fec979e7d1b4ec
         submodules: recursive
 
     - name: Set up Python
@@ -76,12 +91,12 @@ jobs:
         cd micropython/ports/esp32
         make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT submodules
 
-        # Asegurar que el component manager vea esp32-camera vía EXTRA_COMPONENT_DIRS
-        # (el idf_component.yml de mp_camera_api ya declara esp32-camera + esp_new_jpeg).
         echo "=== mp_camera_api idf_component.yml ==="
         cat "${{ github.workspace }}/mp_camera_api/idf_component.yml"
+        echo "=== tflite-lib exists? ==="
+        ls "${{ github.workspace }}/tflm_mp/tflm_esp_kernels/components/tflite-lib" | head
 
-    - name: Compile firmware (S3 OCT + ESP32S3_EYE + camera)
+    - name: Compile firmware (S3 OCT + ESP32S3_EYE + camera + microlite)
       run: |
         set -euo pipefail
         source ~/esp-idf/export.sh
@@ -90,19 +105,22 @@ jobs:
         BOARD=ESP32_GENERIC_S3
         VARIANT=SPIRAM_OCT
         CAM_MODEL=ESP32S3_EYE
-        BUILD_DIR="build-${BOARD}-${VARIANT}-${CAM_MODEL}"
+        BUILD_DIR="build-${BOARD}-${VARIANT}-${CAM_MODEL}-ai"
         CAM_API="${{ github.workspace }}/mp_camera_api"
+        TFLM_MP="${{ github.workspace }}/tflm_mp"
+        MODULES="${{ github.workspace }}/autonomus/firmware/micropython.cmake"
 
         rm -rf "$BUILD_DIR"
 
-        # Misma receta que el CI oficial de cnadler86/micropython-camera-API
         IDF_CMD=(
           idf.py
           -B "$BUILD_DIR"
           -D "MICROPY_BOARD=${BOARD}"
           -D "MICROPY_BOARD_VARIANT=${VARIANT}"
           -D "MICROPY_CAMERA_MODEL=${CAM_MODEL}"
-          -D "USER_C_MODULES=${CAM_API}/micropython.cmake"
+          -D "CAM_API_DIR=${CAM_API}"
+          -D "TFLM_MP_DIR=${TFLM_MP}"
+          -D "USER_C_MODULES=${MODULES}"
           -D "EXTRA_COMPONENT_DIRS=${CAM_API}"
           build
         )
@@ -110,7 +128,6 @@ jobs:
         echo "Running: ${IDF_CMD[*]}"
         "${IDF_CMD[@]}"
 
-        # Empaquetar firmware.bin unificado
         python makeimg.py \
           "$BUILD_DIR/sdkconfig" \
           "$BUILD_DIR/bootloader/bootloader.bin" \
@@ -119,23 +136,25 @@ jobs:
           "$BUILD_DIR/firmware.bin" \
           "$BUILD_DIR/micropython.uf2"
 
-        # Verificación: el bin debe contener el módulo camera
-        echo "=== Verifying camera symbols in firmware.bin ==="
-        if ! strings "$BUILD_DIR/firmware.bin" | grep -E -q 'esp_camera|OV2640|PixelFormat|FrameSize'; then
-          echo "ERROR: firmware.bin no contiene símbolos de cámara"
-          strings "$BUILD_DIR/firmware.bin" | grep -i cam | head -20 || true
+        echo "=== Verifying camera + microlite symbols ==="
+        if ! strings "$BUILD_DIR/firmware.bin" | grep -E -q 'esp_camera|PixelFormat|FrameSize'; then
+          echo "ERROR: faltan símbolos de cámara"
           exit 1
         fi
-        echo "Camera symbols OK"
+        if ! strings "$BUILD_DIR/firmware.bin" | grep -E -q 'microlite|TfLite|tflite'; then
+          echo "ERROR: faltan símbolos de microlite/tflite"
+          strings "$BUILD_DIR/firmware.bin" | grep -i micro | head -30 || true
+          exit 1
+        fi
+        echo "Camera + microlite symbols OK"
         ls -lh "$BUILD_DIR/firmware.bin"
 
-        # Exponer path al job de upload
         echo "FW_DIR=${{ github.workspace }}/micropython/ports/esp32/${BUILD_DIR}" >> "$GITHUB_ENV"
 
     - name: Upload firmware artifact
       uses: actions/upload-artifact@v4
       with:
-        name: micropython-esp32s3-eye-camera
+        name: micropython-esp32s3-eye-camera-ai
         path: |
           ${{ env.FW_DIR }}/firmware.bin
           ${{ env.FW_DIR }}/bootloader/bootloader.bin
