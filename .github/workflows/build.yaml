@@ -101,44 +101,37 @@ jobs:
           sed -i 's/message(SEND_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
           sed -i 's/message(FATAL_ERROR/message(STATUS/g' extmod/extmod.cmake 2>/dev/null || true
           
-          # Enlaces simbólicos y copia limpia para extmod/berkeley-db
           mkdir -p extmod/berkeley-db
           ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/db.h" extmod/berkeley-db/db.h
           ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/mpool.h" extmod/berkeley-db/mpool.h
           cp -rs "${{ github.workspace }}/lib/berkeley-db-1.xx/btree/." extmod/berkeley-db/
 
-          # Directorios de inclusión para el target de CMake
           echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
           echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
         fi
 
-        echo "=== Inyectando macros dentro de berkeley-db/include/compat.h ==="
-        # Inyectamos las macros CIRCLEQ y SWAP dentro de compat.h justo después de los includes de sistema
+        echo "=== Inyectando parches directamente en mpool.h, compat.h y db.h ==="
+        
+        # Inyección directa en el encabezado de mpool.h (donde salta el error)
+        MPOOL_FILE="lib/berkeley-db-1.xx/include/mpool.h"
+        if [ -f "$MPOOL_FILE" ]; then
+          sed -i '1i #include <sys/types.h>\n#include <stdint.h>\n#ifndef CIRCLEQ_ENTRY\n#define CIRCLEQ_ENTRY(type) struct { struct type *cqe_next; struct type *cqe_prev; }\n#define CIRCLEQ_HEAD(name, type) struct name { struct type *cqh_first; struct type *cqh_last; }\n#endif' "$MPOOL_FILE"
+          echo "mpool.h parcheado con CIRCLEQ."
+        fi
+
+        # Inyección de las macros SWAP en compat.h
         COMPAT_FILE="lib/berkeley-db-1.xx/include/compat.h"
         if [ -f "$COMPAT_FILE" ]; then
           cat << 'EOF' >> "$COMPAT_FILE"
 
-        /* --- ESP-IDF v5.x compatibility macros --- */
-        #include <sys/types.h>
-        #include <stdint.h>
-        
-        #ifndef CIRCLEQ_ENTRY
-        #define CIRCLEQ_ENTRY(type) struct { struct type *cqe_next; struct type *cqe_prev; }
-        #define CIRCLEQ_HEAD(name, type) struct name { struct type *cqh_first; struct type *cqh_last; }
-        #define CIRCLEQ_INIT(head) do { (head)->cqh_first = (void *)(head); (head)->cqh_last = (void *)(head); } while (0)
-        #define CIRCLEQ_INSERT_HEAD(head, elm, field) do { (elm)->field.cqe_next = (head)->cqh_first; (elm)->field.cqe_prev = (void *)(head); if ((head)->cqh_last == (void *)(head)) (head)->cqh_last = (elm); else (head)->cqh_first->field.cqe_prev = (elm); (head)->cqh_first = (elm); } while (0)
-        #define CIRCLEQ_INSERT_TAIL(head, elm, field) do { (elm)->field.cqe_next = (void *)(head); (elm)->field.cqe_prev = (head)->cqh_last; if ((head)->cqh_first == (void *)(head)) (head)->cqh_first = (elm); else (head)->cqh_last->field.cqe_next = (elm); (head)->cqh_last = (elm); } while (0)
-        #define CIRCLEQ_REMOVE(head, elm, field) do { if ((elm)->field.cqe_next == (void *)(head)) (head)->cqh_last = (elm)->field.cqe_prev; else (elm)->field.cqe_next->field.cqe_prev = (elm)->field.cqe_prev; if ((elm)->field.cqe_prev == (void *)(head)) (head)->cqh_first = (elm)->field.cqe_next; else (elm)->field.cqe_prev->field.cqe_next = (elm)->field.cqe_next; } while (0)
-        #endif
-        
+        /* --- ESP-IDF v5.x SWAP Macros --- */
         #ifndef M_16_SWAP
         #define M_16_SWAP(x) (__builtin_bswap16(x))
         #define M_32_SWAP(x) (__builtin_bswap32(x))
         #define P_32_SWAP(x) (*((uint32_t*)(x)) = __builtin_bswap32(*((uint32_t*)(x))))
         #endif
-        /* --- END FIX --- */
         EOF
-          echo "compat.h parcheado correctamente."
+          echo "compat.h parcheado con SWAP macros."
         fi
 
         # 2. Bypass para micropython-lib en py/mkrules.cmake
