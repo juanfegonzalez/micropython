@@ -64,7 +64,7 @@ jobs:
         test -f "$MODULES"
 
     # Los usermods marcan flags/macros como INTERFACE y se filtran a TODO MicroPython
-    # (p.ej. -fno-rtti en .c y MICROPY_ROM_TEXT_COMPRESSION redefinido → falla el build).
+    # (p.ej. -fno-rtti en .c, -O3 rompe modbluetooth, audio_frontend exige ulab).
     - name: Patch camera + microlite cmake for IDF5
       env:
         CAM_CMAKE: ${{ github.workspace }}/mp_camera_api/micropython.cmake
@@ -91,15 +91,42 @@ jobs:
 
         ml = Path(os.environ["ML_CMAKE"])
         ml_text = ml.read_text()
-        ml_text2 = ml_text.replace("-fno-rtti", "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>")
-        ml_text2 = ml_text2.replace("-fno-exceptions", "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>")
-        if ml_text2 == ml_text:
-            raise SystemExit("microlite cmake: no -fno-rtti/-fno-exceptions found")
-        ml.write_text(ml_text2)
-        print("patched microlite cmake (CXX-only rtti/exceptions)")
+
+        # 1) C++-only flags
+        ml_text = ml_text.replace("-fno-rtti", "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>")
+        ml_text = ml_text.replace("-fno-exceptions", "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>")
+
+        # 2) No subir -O3/-O2 a TODO el firmware (provoca -Werror=stringop-overflow en modbluetooth)
+        ml_text, n_o3 = re.subn(r"^\s*-O3\s*$", "    # (patched) removed -O3 leak", ml_text, flags=re.M)
+        ml_text, n_o2 = re.subn(r"^\s*-O2\s*$", "    # (patched) removed -O2 leak", ml_text, flags=re.M)
+        if n_o3 + n_o2 < 1:
+            raise SystemExit("microlite cmake: no -O2/-O3 lines found")
+
+        # 3) Quitar audio_frontend.c (depende de ulab/ndarray.h; no hace falta para person_detect)
+        ml_text2, n_af = re.subn(
+            r"^[ \t]*\$\{CMAKE_CURRENT_LIST_DIR\}/audio_frontend\.c\s*\n",
+            "",
+            ml_text,
+            flags=re.M,
+        )
+        if n_af < 1:
+            raise SystemExit(f"microlite cmake: audio_frontend.c not removed (matches={n_af})")
+        ml_text = ml_text2
+
+        # 4) Extra: no tratar stringop-overflow como error si aún se cuela algo
+        if "-Wno-error=stringop-overflow" not in ml_text:
+            ml_text = ml_text.replace(
+                "-Wno-error=maybe-uninitialized",
+                "-Wno-error=maybe-uninitialized\n    -Wno-error=stringop-overflow",
+            )
+
+        ml.write_text(ml_text)
+        print(f"patched microlite cmake (O removed={n_o2+n_o3}, audio_frontend removed={n_af})")
         PY
 
         ! grep -q 'MICROPY_ROM_TEXT_COMPRESSION=0' "$CAM_CMAKE"
+        ! grep -q 'audio_frontend.c' "$ML_CMAKE"
+        ! grep -E -q '^\s*-O3\s*$' "$ML_CMAKE"
         grep -q 'COMPILE_LANGUAGE:CXX>:-fno-rtti' "$ML_CMAKE"
 
     - name: Set up Python
