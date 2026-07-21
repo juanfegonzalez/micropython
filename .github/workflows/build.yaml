@@ -81,11 +81,8 @@ jobs:
           fi
         '
 
-    - name: Copy Camera Driver to Expected Path
-      run: |
-        rm -rf "${{ github.workspace }}/ports/esp32/main/camera_modules"
-        mkdir -p "${{ github.workspace }}/ports/esp32/main/camera_modules"
-        cp -r "${{ github.workspace }}/micropython-camera-driver/src/." "${{ github.workspace }}/ports/esp32/main/camera_modules"
+    # El driver se enlaza vía USER_C_MODULES (micropython.cmake).
+    # No basta con copiar fuentes a camera_modules: sin USER_C_MODULES no existe import camera.
 
     - name: Prepare and Verify Berkeley DB Path
       run: |
@@ -175,15 +172,21 @@ jobs:
     
     - name: Clone esp32-camera component
       run: |
-        mkdir -p ports/esp32/components
-        git clone --depth 1 https://github.com/espressif/esp32-camera.git ports/esp32/components/esp32-camera
-        
+        source ports/esp32/esp-idf/export.sh
+        # lemariva/micropython.cmake busca el driver en $IDF_PATH/components/esp32-camera
+        rm -rf "$IDF_PATH/components/esp32-camera"
+        git clone --depth 1 https://github.com/espressif/esp32-camera.git "$IDF_PATH/components/esp32-camera"
+
     - name: Compile Firmware
       run: |
         source ports/esp32/esp-idf/export.sh
         cd ports/esp32
         rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
-        make -j2 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT
+        # Sin USER_C_MODULES el bin sale "dirty" pero sin módulo camera (lo que pasó con el artefacto actual)
+        make -j2 \
+          BOARD=ESP32_GENERIC_S3 \
+          BOARD_VARIANT=SPIRAM_OCT \
+          USER_C_MODULES="${{ github.workspace }}/micropython-camera-driver/src/micropython.cmake"
 
     - name: Upload Firmware Artifacts
       uses: actions/upload-artifact@v4
