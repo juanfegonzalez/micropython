@@ -95,27 +95,32 @@ jobs:
 
     - name: Bypass CMake Submodule Checks and Force Compile Flags
       run: |
-        # 1. Bypass de validación para berkeley-db en extmod.cmake
+        # 1. Bypass para berkeley-db en extmod.cmake
         if [ -f "extmod/extmod.cmake" ]; then
           sed -i 's/message(FATAL_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
           sed -i 's/message(SEND_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
           sed -i 's/message(FATAL_ERROR/message(STATUS/g' extmod/extmod.cmake 2>/dev/null || true
           
-          echo "=== Añadiendo directorios de inclusión nativos a modbtree.c ==="
-          # Esto soluciona el "fatal error: btree.h: No such file or directory" de modbtree.c
-          # sin ensuciar los includes globales de todo __idf_main
-          echo "" >> extmod/extmod.cmake
-          echo "set_source_files_properties(\${MICROPY_DIR}/extmod/modbtree.c PROPERTIES COMPILE_FLAGS \"-I${{ github.workspace }}/lib/berkeley-db-1.xx/include -I${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
-        fi
-        
-        echo "=== Inyectando macros dentro del config nativo del port de Berkeley DB ==="
-        CONFIG_PORT="extmod/berkeley-db/berkeley_db_config_port.h"
-        if [ -f "$CONFIG_PORT" ]; then
-          # Al inyectar aquí, nos aseguramos de que TODO archivo de la BD (y modbtree.c)
-          # herede las macros CIRCLEQ y SWAP sin alterar el orden original de los includes
-          cat << 'EOF' >> "$CONFIG_PORT"
+          # Mapeo y copiado de archivos para extmod/berkeley-db
+          mkdir -p extmod/berkeley-db
+          ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/db.h" extmod/berkeley-db/db.h
+          ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/mpool.h" extmod/berkeley-db/mpool.h
+          cp -rs "${{ github.workspace }}/lib/berkeley-db-1.xx/btree/." extmod/berkeley-db/
 
-        /* --- FIX ESP-IDF v5.x macros missing in sys/queue.h --- */
+          # Añadir directorios de inclusión a nivel de CMake
+          echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
+          echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
+        fi
+
+        echo "=== Inyectando parches directamente en compat.h y db.h de berkeley-db ==="
+        
+        # Preparamos el bloque de macros a inyectar
+        FIX_BLOCK=$(cat << 'EOF'
+
+        /* --- FIX ESP-IDF v5.x macros for CIRCLEQ and SWAP --- */
+        #include <sys/types.h>
+        #include <stdint.h>
+        
         #ifndef CIRCLEQ_ENTRY
         #define CIRCLEQ_ENTRY(type) struct { struct type *cqe_next; struct type *cqe_prev; }
         #define CIRCLEQ_HEAD(name, type) struct name { struct type *cqh_first; struct type *cqh_last; }
@@ -124,7 +129,7 @@ jobs:
         #define CIRCLEQ_INSERT_TAIL(head, elm, field) do { (elm)->field.cqe_next = (void *)(head); (elm)->field.cqe_prev = (head)->cqh_last; if ((head)->cqh_first == (void *)(head)) (head)->cqh_first = (elm); else (head)->cqh_last->field.cqe_next = (elm); (head)->cqh_last = (elm); } while (0)
         #define CIRCLEQ_REMOVE(head, elm, field) do { if ((elm)->field.cqe_next == (void *)(head)) (head)->cqh_last = (elm)->field.cqe_prev; else (elm)->field.cqe_next->field.cqe_prev = (elm)->field.cqe_prev; if ((elm)->field.cqe_prev == (void *)(head)) (head)->cqh_first = (elm)->field.cqe_next; else (elm)->field.cqe_prev->field.cqe_next = (elm)->field.cqe_next; } while (0)
         #endif
-
+        
         #ifndef M_16_SWAP
         #define M_16_SWAP(x) (__builtin_bswap16(x))
         #define M_32_SWAP(x) (__builtin_bswap32(x))
@@ -132,7 +137,20 @@ jobs:
         #endif
         /* --- END FIX --- */
         EOF
-          echo "Parche interno aplicado con éxito."
+        )
+
+        # Inyectamos al principio de compat.h
+        COMPAT_FILE="lib/berkeley-db-1.xx/include/compat.h"
+        if [ -f "$COMPAT_FILE" ]; then
+          echo "$FIX_BLOCK" | cat - "$COMPAT_FILE" > temp && mv temp "$COMPAT_FILE"
+          echo "Inyectado en compat.h"
+        fi
+
+        # Inyectamos al principio de db.h
+        DB_FILE="lib/berkeley-db-1.xx/include/db.h"
+        if [ -f "$DB_FILE" ]; then
+          echo "$FIX_BLOCK" | cat - "$DB_FILE" > temp && mv temp "$DB_FILE"
+          echo "Inyectado en db.h"
         fi
         
         # 2. Bypass para micropython-lib en py/mkrules.cmake
