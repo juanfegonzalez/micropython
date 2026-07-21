@@ -157,13 +157,12 @@ jobs:
           mv temp_db.h "$DB_HEADER"
         fi
 
-        echo "=== Sincronizando la firma de bt_open.c y definiendo stub de sigprocmask ==="
+        echo "=== Sincronizando la firma de bt_open.c y neutralizando sigprocmask ==="
         BT_OPEN_FILE="lib/berkeley-db-1.xx/btree/bt_open.c"
         if [ -f "$BT_OPEN_FILE" ]; then
-          # Define macro stub para sigprocmask
-          sed -i '1i #ifndef sigprocmask\n#define sigprocmask(how, set, oset) (0)\n#endif' "$BT_OPEN_FILE"
+          sed -i '/#define sigprocmask/d' "$BT_OPEN_FILE"
+          sed -i 's/\bsigprocmask\s*(/ (void)(/g' "$BT_OPEN_FILE"
 
-          # Ejecuta la sustitucion con Python de forma segura sin heredocs
           python3 -c "import re; p = '$BT_OPEN_FILE'; c = open(p).read(); open(p, 'w').write(re.sub(r'__bt_open\s*\([^)]*\)\s*const\s+char\s*\*fname;[\s\S]*?\{\s*', '__bt_open(const void *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int dflags)\n{\n    int flags = 0, mode = 0;\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n', c))"
         fi
 
