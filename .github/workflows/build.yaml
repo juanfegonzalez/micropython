@@ -110,7 +110,7 @@ jobs:
           echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
         fi
 
-        echo "=== Parcheando mpool.h y compat.h ==="
+        echo "=== Inyectando macros de compatibilidad en mpool.h ==="
         MPOOL_FILE="lib/berkeley-db-1.xx/include/mpool.h"
         if [ -f "$MPOOL_FILE" ]; then
           printf '%s\n' \
@@ -134,24 +134,25 @@ jobs:
           mv temp_mpool.h "$MPOOL_FILE"
         fi
 
-        echo "=== Configurando berkeley_db_config_port.h para modbtree.c ==="
-        PORT_CFG="extmod/berkeley-db/berkeley_db_config_port.h"
-        mkdir -p extmod/berkeley-db
-        
-        # Inyectamos el soporte de FILEVTABLE y prototipo de __bt_open si no existen
-        printf '%s\n' \
-          '#pragma once' \
-          '#include <sys/types.h>' \
-          'typedef struct { ssize_t (*read)(void *, void *, size_t); ssize_t (*write)(void *, const void *, size_t); off_t (*seek)(void *, off_t, int); int (*fsync)(void *); } FILEVTABLE;' \
-          'struct __db;' \
-          'struct __btinfo;' \
-          'struct __db *__bt_open(const char *, const FILEVTABLE *, const struct __btinfo *, int);' \
-          > temp_cfg.h
+        echo "=== Parcheando db.h para declarar FILEVTABLE y __bt_open ==="
+        DB_HEADER="lib/berkeley-db-1.xx/include/db.h"
+        if [ -f "$DB_HEADER" ]; then
+          printf '%s\n' \
+            '#include <sys/types.h>' \
+            '#include <stdint.h>' \
+            'typedef struct {' \
+            '    ssize_t (*read)(void *, void *, size_t);' \
+            '    ssize_t (*write)(void *, const void *, size_t);' \
+            '    off_t (*seek)(void *, off_t, int);' \
+            '    int (*fsync)(void *);' \
+            '} FILEVTABLE;' \
+            'struct __btinfo;' \
+            'struct __db *__bt_open(const char *, const FILEVTABLE *, const struct __btinfo *, int);' \
+            > temp_db.h
 
-        if [ -f "$PORT_CFG" ]; then
-          cat "$PORT_CFG" >> temp_cfg.h
+          cat "$DB_HEADER" >> temp_db.h
+          mv temp_db.h "$DB_HEADER"
         fi
-        mv temp_cfg.h "$PORT_CFG"
 
         # 2. Bypass para micropython-lib en py/mkrules.cmake
         if [ -f "py/mkrules.cmake" ]; then
