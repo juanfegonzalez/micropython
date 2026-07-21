@@ -171,10 +171,43 @@ jobs:
     
     - name: Clone esp32-camera component
       run: |
+        set -euo pipefail
         source ports/esp32/esp-idf/export.sh
-        # lemariva/micropython.cmake busca el driver en $IDF_PATH/components/esp32-camera
+        # lemariva/micropython.cmake busca includes en $IDF_PATH/components/esp32-camera
         rm -rf "$IDF_PATH/components/esp32-camera"
         git clone --depth 1 https://github.com/espressif/esp32-camera.git "$IDF_PATH/components/esp32-camera"
+
+        # CRÍTICO: si esp32-camera declara esp_jpeg aquí, el component manager lo mete
+        # también en bootloader/subproject (sin FreeRTOS) y el build muere.
+        # Quitamos la dep del camera; la app la pedirá solo desde main/idf_component.yml.
+        python3 - <<PY
+        from pathlib import Path
+        import re
+        cam_yml = Path("$IDF_PATH/components/esp32-camera/idf_component.yml")
+        text = cam_yml.read_text()
+        text2 = re.sub(r"\n[ \t]*esp_jpeg:[^\n]*(?:\n[ \t]+[^\n]*)*", "\n", text)
+        cam_yml.write_text(text2)
+        print("esp32-camera idf_component.yml without esp_jpeg:")
+        print(cam_yml.read_text())
+
+        main_yml = Path("${{ github.workspace }}/ports/esp32/main/idf_component.yml")
+        main = main_yml.read_text()
+        if "esp_jpeg" not in main:
+            main = main.replace(
+                "dependencies:\n",
+                "dependencies:\n  espressif/esp_jpeg: \"~1.3.1\"\n",
+                1,
+            )
+            main_yml.write_text(main)
+            print("Added espressif/esp_jpeg to main/idf_component.yml")
+        else:
+            print("main/idf_component.yml already mentions esp_jpeg")
+        print(main_yml.read_text())
+        PY
+
+        # Por si quedó basura de builds anteriores en el runner cacheado
+        rm -rf "$IDF_PATH/components/bootloader/subproject/managed_components/espressif__esp_jpeg"
+        rm -rf "${{ github.workspace }}/ports/esp32/managed_components/espressif__esp_jpeg"
 
     - name: Compile Firmware
       run: |
@@ -187,40 +220,33 @@ jobs:
         BUILD_DIR="build-${BOARD}-${VARIANT}"
         USER_MOD="${{ github.workspace }}/micropython-camera-driver/src/micropython.cmake"
 
-        patch_esp_jpeg() {
-          echo "=== Buscando CMakeLists de esp_jpeg para excluirlos del bootloader ==="
-          find "${{ github.workspace }}" "$IDF_PATH" -type f -name 'CMakeLists.txt' 2>/dev/null \
-            | grep -E 'esp_jpeg|espressif__esp_jpeg' \
-            | while read -r f; do
-                if grep -q 'NOT BOOTLOADER_BUILD' "$f"; then
-                  echo "Ya parcheado: $f"
-                  continue
-                fi
-                { echo 'if(NOT BOOTLOADER_BUILD)'; cat "$f"; echo 'endif()'; } > "$f.tmp"
-                mv "$f.tmp" "$f"
-                echo "Parcheado: $f"
-              done || true
+        # Defensa extra: si reaparece esp_jpeg en el bootloader, vaciar fuentes (sin FreeRTOS).
+        neutralize_bootloader_jpeg() {
+          local d="$IDF_PATH/components/bootloader/subproject/managed_components/espressif__esp_jpeg"
+          if [ -d "$d" ]; then
+            echo "Neutralizando $d"
+            find "$d" -type f \( -name '*.c' -o -name '*.cpp' \) -exec sh -c 'echo "/* stubbed: no FreeRTOS in bootloader */" > "$1"' _ {} \;
+            printf '%s\n' 'idf_component_register()' > "$d/CMakeLists.txt"
+          fi
         }
 
         rm -rf "$BUILD_DIR"
 
-        # 1) Primera pasada: descarga managed_components (espressif__esp_jpeg en bootloader).
-        #    Suele fallar exactamente con FreeRTOS.h; eso es esperado.
         set +e
         make -j2 BOARD="$BOARD" BOARD_VARIANT="$VARIANT" USER_C_MODULES="$USER_MOD"
-        FIRST_RC=$?
+        RC=$?
         set -e
 
-        # 2) Parchear esp_jpeg ahora que existe bajo bootloader/subproject/managed_components
-        patch_esp_jpeg
-
-        if [ "$FIRST_RC" -eq 0 ]; then
-          echo "Build OK en la primera pasada"
+        if [ "$RC" -eq 0 ]; then
+          echo "Build OK"
           exit 0
         fi
 
-        # 3) Limpiar solo el bootloader y reintentar con el CMakeLists ya envuelto
-        rm -rf "$BUILD_DIR/bootloader"
+        echo "Build falló; aplicando neutralización de esp_jpeg en bootloader y reintentando..."
+        neutralize_bootloader_jpeg
+        # Rebuild completo (borrar solo bootloader rompe la cache de CMake)
+        rm -rf "$BUILD_DIR"
+        neutralize_bootloader_jpeg
         make -j2 BOARD="$BOARD" BOARD_VARIANT="$VARIANT" USER_C_MODULES="$USER_MOD"
 
     - name: Upload Firmware Artifacts
