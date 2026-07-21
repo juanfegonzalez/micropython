@@ -15,10 +15,9 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - name: Checkout this repo (workflow context)
+    # Repo del proyecto en la raíz del workspace ($GITHUB_WORKSPACE/firmware/...)
+    - name: Checkout this repo
       uses: actions/checkout@v4
-      with:
-        path: autonomus
 
     - name: Checkout MicroPython
       uses: actions/checkout@v4
@@ -51,6 +50,18 @@ jobs:
         # Commit fijado en el submodule de mocleiri (estructura components/tflite-lib)
         ref: 2690c7a7a27164eea6bd7d38e6fec979e7d1b4ec
         submodules: recursive
+
+    - name: Verify USER_C_MODULES wrapper
+      run: |
+        set -euo pipefail
+        MODULES="${{ github.workspace }}/firmware/micropython.cmake"
+        echo "Looking for: $MODULES"
+        ls -la "${{ github.workspace }}/firmware" || {
+          echo "ERROR: falta firmware/ en el repo. Asegúrate de subir firmware/micropython.cmake"
+          ls -la "${{ github.workspace }}"
+          exit 1
+        }
+        test -f "$MODULES"
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -108,7 +119,7 @@ jobs:
         BUILD_DIR="build-${BOARD}-${VARIANT}-${CAM_MODEL}-ai"
         CAM_API="${{ github.workspace }}/mp_camera_api"
         TFLM_MP="${{ github.workspace }}/tflm_mp"
-        MODULES="${{ github.workspace }}/autonomus/firmware/micropython.cmake"
+        MODULES="${{ github.workspace }}/firmware/micropython.cmake"
 
         rm -rf "$BUILD_DIR"
 
@@ -149,14 +160,12 @@ jobs:
         echo "Camera + microlite symbols OK"
         ls -lh "$BUILD_DIR/firmware.bin"
 
-        echo "FW_DIR=${{ github.workspace }}/micropython/ports/esp32/${BUILD_DIR}" >> "$GITHUB_ENV"
-
     - name: Upload firmware artifact
       uses: actions/upload-artifact@v4
       with:
         name: micropython-esp32s3-eye-camera-ai
         path: |
-          ${{ env.FW_DIR }}/firmware.bin
-          ${{ env.FW_DIR }}/bootloader/bootloader.bin
-          ${{ env.FW_DIR }}/partition_table/partition-table.bin
+          ${{ github.workspace }}/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT-ESP32S3_EYE-ai/firmware.bin
+          ${{ github.workspace }}/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT-ESP32S3_EYE-ai/bootloader/bootloader.bin
+          ${{ github.workspace }}/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT-ESP32S3_EYE-ai/partition_table/partition-table.bin
         if-no-files-found: error
