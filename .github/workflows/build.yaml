@@ -63,6 +63,45 @@ jobs:
         }
         test -f "$MODULES"
 
+    # Los usermods marcan flags/macros como INTERFACE y se filtran a TODO MicroPython
+    # (p.ej. -fno-rtti en .c y MICROPY_ROM_TEXT_COMPRESSION redefinido → falla el build).
+    - name: Patch camera + microlite cmake for IDF5
+      env:
+        CAM_CMAKE: ${{ github.workspace }}/mp_camera_api/micropython.cmake
+        ML_CMAKE: ${{ github.workspace }}/tflm_mp/micropython-modules/microlite/micropython.cmake
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import os, re
+        from pathlib import Path
+
+        cam = Path(os.environ["CAM_CMAKE"])
+        text = cam.read_text()
+        text2, n = re.subn(
+            r"# Camera module strings.*?MICROPY_ROM_TEXT_COMPRESSION=0\s*\)\s*",
+            "# (patched) skip MICROPY_ROM_TEXT_COMPRESSION redefine — breaks MP build\n",
+            text,
+            count=1,
+            flags=re.S,
+        )
+        if n != 1:
+            raise SystemExit(f"camera cmake patch failed (matches={n})")
+        cam.write_text(text2)
+        print("patched camera cmake")
+
+        ml = Path(os.environ["ML_CMAKE"])
+        ml_text = ml.read_text()
+        ml_text2 = ml_text.replace("-fno-rtti", "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>")
+        ml_text2 = ml_text2.replace("-fno-exceptions", "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>")
+        if ml_text2 == ml_text:
+            raise SystemExit("microlite cmake: no -fno-rtti/-fno-exceptions found")
+        ml.write_text(ml_text2)
+        print("patched microlite cmake (CXX-only rtti/exceptions)")
+        PY
+
+        ! grep -q 'MICROPY_ROM_TEXT_COMPRESSION=0' "$CAM_CMAKE"
+        grep -q 'COMPILE_LANGUAGE:CXX>:-fno-rtti' "$ML_CMAKE"
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -137,7 +176,13 @@ jobs:
         )
 
         echo "Running: ${IDF_CMD[*]}"
-        "${IDF_CMD[@]}"
+        if ! "${IDF_CMD[@]}"; then
+          echo "=== idf build failed; last stderr log ==="
+          ls -lt "$BUILD_DIR/log" | head
+          # Mostrar errores reales (no solo warnings del final)
+          grep -E "error:|fatal error:|undefined reference" "$BUILD_DIR/log"/* 2>/dev/null | tail -80 || true
+          exit 1
+        fi
 
         python makeimg.py \
           "$BUILD_DIR/sdkconfig" \
