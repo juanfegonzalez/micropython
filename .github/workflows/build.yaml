@@ -150,7 +150,7 @@ jobs:
             '} FILEVTABLE;' \
             '#endif' \
             'struct __db;' \
-            'struct __db *__bt_open(const char *fname, const FILEVTABLE *vtable, const void *openinfo, int dflags);' \
+            'struct __db *__bt_open(const char *fname, const FILEVTABLE *vtable, const void *openinfo, int flags, int mode, int dflags);' \
             > temp_db.h
 
           cat "$DB_HEADER" >> temp_db.h
@@ -160,14 +160,13 @@ jobs:
         echo "=== Modernizando la firma de bt_open.c a ANSI C ==="
         BT_OPEN_FILE="lib/berkeley-db-1.xx/btree/bt_open.c"
         if [ -f "$BT_OPEN_FILE" ]; then
-          # Convertimos la cabecera K&R de __bt_open a ANSI C de 4 parametros
           python3 -c '
         import re
         with open("lib/berkeley-db-1.xx/btree/bt_open.c", "r") as f:
             content = f.read()
         
         pattern = r"__bt_open\s*\([^)]*\)\s*const\s+char\s*\*fname;[\s\S]*?\{\s*"
-        replacement = "__bt_open(const char *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int dflags)\n{\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n"
+        replacement = "__bt_open(const char *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int flags, int mode, int dflags)\n{\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n"
         
         new_content = re.sub(pattern, replacement, content)
         with open("lib/berkeley-db-1.xx/btree/bt_open.c", "w") as f:
