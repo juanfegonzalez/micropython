@@ -1,279 +1,143 @@
-name: Build ESP32-S3 Octal Camera Firmware
+name: Build ESP32-S3-EYE Camera Firmware
+
+# Firmware MicroPython + módulo camera (API moderna) para ESP32-S3-EYE.
+# Artefacto: micropython-esp32s3-eye-camera / firmware.bin
 
 on:
   push:
-    branches:
-      - master
+    branches: [master, main]
   pull_request:
-    branches:
-      - master
+    branches: [master, main]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
-    - name: Checkout MicroPython Base
+    - name: Checkout this repo (workflow context)
       uses: actions/checkout@v4
       with:
-        repository: '${{ github.repository_owner }}/micropython'
-        fetch-depth: 0
+        path: autonomus
 
-    - name: Checkout Custom Camera Driver
+    - name: Checkout MicroPython
       uses: actions/checkout@v4
       with:
-        repository: '${{ github.repository_owner }}/micropython-camera-driver'
-        path: micropython-camera-driver
+        repository: micropython/micropython
+        path: micropython
+        fetch-depth: 1
+        submodules: recursive
 
-    - name: Bring Berkeley DB Dependency (BTree)
+    # Driver MicroPython moderno (import camera / from camera import Camera)
+    # Incluye submodule esp32-camera y evita el stack viejo de lemariva.
+    - name: Checkout micropython-camera-API
       uses: actions/checkout@v4
       with:
-        repository: 'pfalcon/berkeley-db-1.xx'
-        path: btree-temp
-
-    - name: Bring MicroPython Lib Dependency
-      uses: actions/checkout@v4
-      with:
-        repository: 'micropython/micropython-lib'
-        path: lib/micropython-lib
+        repository: cnadler86/micropython-camera-API
+        path: mp_camera_api
+        submodules: recursive
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: "3.11"
 
-    - name: Install Dependencies
+    - name: Install OS packages
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential libffi-dev git pkg-config cmake ninja-build
+        sudo apt-get install -y build-essential cmake ninja-build ccache \
+          git wget flex bison gperf libffi-dev libssl-dev dfu-util libusb-1.0-0 \
+          pkg-config python3-venv
 
-    - name: Cache ESP-IDF Tools
+    - name: Cache ESP-IDF
       uses: actions/cache@v4
       with:
         path: |
+          ~/esp-idf
           ~/.espressif
-        key: ${{ runner.os }}-esp-idf-v5.3-${{ hashFiles('ports/esp32/Makefile') }}
+          !~/.espressif/dist
+        key: esp-idf-v5.5.1-${{ runner.os }}
 
-    - name: Install ESP-IDF Tools
+    - name: Install ESP-IDF v5.5.1
       run: |
-        cd ports/esp32
-        if [ ! -d "esp-idf" ] || [ -z "$(ls -A esp-idf 2>/dev/null)" ]; then
-          echo "Clonando ESP-IDF v5.3 de forma manual..."
-          rm -rf esp-idf
-          git clone -b v5.3 --recursive https://github.com/espressif/esp-idf.git esp-idf
+        if [ ! -f "$HOME/esp-idf/export.sh" ]; then
+          git clone --depth 1 --branch v5.5.1 https://github.com/espressif/esp-idf.git ~/esp-idf
+          git -C ~/esp-idf submodule update --init --recursive --filter=tree:0
+          cd ~/esp-idf && ./install.sh esp32s3
         fi
-        ./esp-idf/install.sh
 
     - name: Build mpy-cross
-      run: |
-        make -C mpy-cross
+      run: make -C micropython/mpy-cross -j$(nproc)
 
-    - name: Patch Framework (Fix Bootloader & JPEG Conflict)
-      run: |
-        # Solo sirve si esp_jpeg ya existe; el parche real está en Compile (tras el fetch).
-        find . -type f -name 'CMakeLists.txt' 2>/dev/null | grep -E 'esp_jpeg|espressif__esp_jpeg' | while read -r f; do
-          if ! grep -q 'NOT BOOTLOADER_BUILD' "$f"; then
-            { echo 'if(NOT BOOTLOADER_BUILD)'; cat "$f"; echo 'endif()'; } > "$f.tmp"
-            mv "$f.tmp" "$f"
-            echo "Parcheado: $f"
-          fi
-        done || true
-
-    # El driver se enlaza vía USER_C_MODULES (micropython.cmake).
-    # No basta con copiar fuentes a camera_modules: sin USER_C_MODULES no existe import camera.
-
-    - name: Prepare and Verify Berkeley DB Path
-      run: |
-        rm -rf lib/berkeley-db-1.xx
-        mkdir -p lib/berkeley-db-1.xx
-        cp -r btree-temp/. lib/berkeley-db-1.xx/
-
-    - name: Bypass CMake Submodule Checks and Patch Berkeley DB Headers
-      run: |
-        # 1. Bypass para berkeley-db en extmod.cmake
-        if [ -f "extmod/extmod.cmake" ]; then
-          sed -i 's/message(FATAL_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
-          sed -i 's/message(SEND_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
-          sed -i 's/message(FATAL_ERROR/message(STATUS/g' extmod/extmod.cmake 2>/dev/null || true
-          
-          mkdir -p extmod/berkeley-db
-          ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/db.h" extmod/berkeley-db/db.h
-          ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/mpool.h" extmod/berkeley-db/mpool.h
-          cp -rs "${{ github.workspace }}/lib/berkeley-db-1.xx/btree/." extmod/berkeley-db/
-
-          echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
-          echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
-        fi
-
-        echo "=== Inyectando macros de compatibilidad en mpool.h ==="
-        MPOOL_FILE="lib/berkeley-db-1.xx/include/mpool.h"
-        if [ -f "$MPOOL_FILE" ]; then
-          printf '%s\n' \
-            '#include <sys/types.h>' \
-            '#include <stdint.h>' \
-            '#ifndef CIRCLEQ_ENTRY' \
-            '#define CIRCLEQ_ENTRY(type) struct { struct type *cqe_next; struct type *cqe_prev; }' \
-            '#define CIRCLEQ_HEAD(name, type) struct name { struct type *cqh_first; struct type *cqh_last; }' \
-            '#define CIRCLEQ_INIT(head) do { (head)->cqh_first = (void *)(head); (head)->cqh_last = (void *)(head); } while (0)' \
-            '#define CIRCLEQ_INSERT_HEAD(head, elm, field) do { (elm)->field.cqe_next = (head)->cqh_first; (elm)->field.cqe_prev = (void *)(head); if ((head)->cqh_last == (void *)(head)) (head)->cqh_last = (elm); else (head)->cqh_first->field.cqe_prev = (elm); (head)->cqh_first = (elm); } while (0)' \
-            '#define CIRCLEQ_INSERT_TAIL(head, elm, field) do { (elm)->field.cqe_next = (void *)(head); (elm)->field.cqe_prev = (head)->cqh_last; if ((head)->cqh_first == (void *)(head)) (head)->cqh_first = (elm); else (head)->cqh_last->field.cqe_next = (elm); (head)->cqh_last = (elm); } while (0)' \
-            '#define CIRCLEQ_REMOVE(head, elm, field) do { if ((elm)->field.cqe_next == (void *)(head)) (head)->cqh_last = (elm)->field.cqe_prev; else (elm)->field.cqe_next->field.cqe_prev = (elm)->field.cqe_prev; if ((elm)->field.cqe_prev == (void *)(head)) (head)->cqh_first = (elm)->field.cqe_next; else (elm)->field.cqe_prev->field.cqe_next = (elm)->field.cqe_next; } while (0)' \
-            '#endif' \
-            '#ifndef M_16_SWAP' \
-            '#define M_16_SWAP(x) (__builtin_bswap16(x))' \
-            '#define M_32_SWAP(x) (__builtin_bswap32(x))' \
-            '#define P_32_SWAP(x) (*((uint32_t*)(x)) = __builtin_bswap32(*((uint32_t*)(x))))' \
-            '#endif' > temp_mpool.h
-
-          cat "$MPOOL_FILE" >> temp_mpool.h
-          mv temp_mpool.h "$MPOOL_FILE"
-        fi
-
-        echo "=== Parcheando db.h para MicroPython ==="
-        DB_HEADER="lib/berkeley-db-1.xx/include/db.h"
-        if [ -f "$DB_HEADER" ]; then
-          printf '%s\n' \
-            '#include <sys/types.h>' \
-            '#include <stdint.h>' \
-            '#ifndef FILEVTABLE_DEFINED' \
-            '#define FILEVTABLE_DEFINED' \
-            'typedef struct {' \
-            '    ssize_t (*read)(void *, void *, size_t);' \
-            '    ssize_t (*write)(void *, const void *, size_t);' \
-            '    off_t (*seek)(void *, off_t, int);' \
-            '    int (*fsync)(void *);' \
-            '} FILEVTABLE;' \
-            '#endif' \
-            'struct __db;' \
-            'struct __db *__bt_open(const void *fname, const FILEVTABLE *vtable, const void *openinfo, int dflags);' \
-            > temp_db.h
-
-          cat "$DB_HEADER" >> temp_db.h
-          mv temp_db.h "$DB_HEADER"
-        fi
-
-        echo "=== Sincronizando la firma de bt_open.c y neutralizando sigprocmask ==="
-        BT_OPEN_FILE="lib/berkeley-db-1.xx/btree/bt_open.c"
-        if [ -f "$BT_OPEN_FILE" ]; then
-          sed -i '/#define sigprocmask/d' "$BT_OPEN_FILE"
-          sed -i 's/\bsigprocmask\s*(/ (void)(/g' "$BT_OPEN_FILE"
-
-          python3 -c "import re; p = '$BT_OPEN_FILE'; c = open(p).read(); open(p, 'w').write(re.sub(r'__bt_open\s*\([^)]*\)\s*const\s+char\s*\*fname;[\s\S]*?\{\s*', '__bt_open(const void *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int dflags)\n{\n    int flags = 0, mode = 0;\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n', c))"
-        fi
-
-        # 2. Bypass para micropython-lib en py/mkrules.cmake
-        if [ -f "py/mkrules.cmake" ]; then
-          sed -i 's/message(FATAL_ERROR.*micropython-lib.*)/message(STATUS "Bypassed micropython-lib error")/g' py/mkrules.cmake
-          sed -i 's/message(SEND_ERROR.*micropython-lib.*)/message(STATUS "Bypassed micropython-lib error")/g' py/mkrules.cmake
-          sed -i 's/message(FATAL_ERROR/message(STATUS/g' py/mkrules.cmake 2>/dev/null || true
-        fi
-    
-    - name: Clone esp32-camera component
+    - name: Prepare MicroPython esp32 port
       run: |
         set -euo pipefail
-        source ports/esp32/esp-idf/export.sh
-        # lemariva/micropython.cmake busca includes en $IDF_PATH/components/esp32-camera
-        rm -rf "$IDF_PATH/components/esp32-camera"
-        git clone --depth 1 https://github.com/espressif/esp32-camera.git "$IDF_PATH/components/esp32-camera"
+        source ~/esp-idf/export.sh
+        cd micropython/ports/esp32
+        make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT submodules
 
-        # esp_jpeg SÍ hace falta para compilar conversions/ de esp32-camera.
-        # Si la dep vive en idf_component.yml del camera (componente global de IDF),
-        # el bootloader también la arrastra y revienta sin FreeRTOS.
-        # Solución: dep solo en main (app) + REQUIRES explícito en CMakeLists del camera.
-        python3 - <<'PY'
-        from pathlib import Path
-        import os, re
+        # Asegurar que el component manager vea esp32-camera vía EXTRA_COMPONENT_DIRS
+        # (el idf_component.yml de mp_camera_api ya declara esp32-camera + esp_new_jpeg).
+        echo "=== mp_camera_api idf_component.yml ==="
+        cat "${{ github.workspace }}/mp_camera_api/idf_component.yml"
 
-        idf = Path(os.environ["IDF_PATH"])
-        ws = Path("${{ github.workspace }}")
-
-        cam_yml = idf / "components/esp32-camera/idf_component.yml"
-        text = cam_yml.read_text()
-        text2 = re.sub(r"\n[ \t]*esp_jpeg:[^\n]*(?:\n[ \t]+[^\n]*)*", "\n", text)
-        cam_yml.write_text(text2)
-        print("=== esp32-camera idf_component.yml (sin esp_jpeg) ===")
-        print(cam_yml.read_text())
-
-        main_yml = ws / "ports/esp32/main/idf_component.yml"
-        main = main_yml.read_text()
-        if "esp_jpeg" not in main:
-            main = main.replace(
-                "dependencies:\n",
-                'dependencies:\n  espressif/esp_jpeg: "~1.3.1"\n',
-                1,
-            )
-            main_yml.write_text(main)
-            print("Added espressif/esp_jpeg to main/idf_component.yml")
-        print("=== main/idf_component.yml ===")
-        print(main_yml.read_text())
-
-        cam_cmake = idf / "components/esp32-camera/CMakeLists.txt"
-        cmake = cam_cmake.read_text()
-        if "espressif__esp_jpeg" not in cmake:
-            cmake = cmake.replace(
-                "list(APPEND priv_requires freertos nvs_flash esp_mm)",
-                "list(APPEND priv_requires freertos nvs_flash esp_mm espressif__esp_jpeg)",
-            )
-            # Por si la línea cambia en el futuro, forzar antes del register:
-            if "espressif__esp_jpeg" not in cmake:
-                cmake = cmake.replace(
-                    "idf_component_register(",
-                    "list(APPEND priv_requires espressif__esp_jpeg)\n\nidf_component_register(",
-                )
-            cam_cmake.write_text(cmake)
-            print("Patched esp32-camera CMakeLists.txt to PRIV_REQUIRES espressif__esp_jpeg")
-        PY
-
-        # Basura de bootloader de runs previos
-        rm -rf "$IDF_PATH/components/bootloader/subproject/managed_components/espressif__esp_jpeg"
-        rm -rf "${{ github.workspace }}/ports/esp32/managed_components/espressif__esp_jpeg"
-
-    - name: Compile Firmware
+    - name: Compile firmware (S3 OCT + ESP32S3_EYE + camera)
       run: |
         set -euo pipefail
-        source ports/esp32/esp-idf/export.sh
-        cd ports/esp32
+        source ~/esp-idf/export.sh
+        cd micropython/ports/esp32
 
         BOARD=ESP32_GENERIC_S3
         VARIANT=SPIRAM_OCT
-        BUILD_DIR="build-${BOARD}-${VARIANT}"
-        USER_MOD="${{ github.workspace }}/micropython-camera-driver/src/micropython.cmake"
-
-        # Defensa extra: si reaparece esp_jpeg en el bootloader, vaciar fuentes (sin FreeRTOS).
-        neutralize_bootloader_jpeg() {
-          local d="$IDF_PATH/components/bootloader/subproject/managed_components/espressif__esp_jpeg"
-          if [ -d "$d" ]; then
-            echo "Neutralizando $d"
-            find "$d" -type f \( -name '*.c' -o -name '*.cpp' \) -exec sh -c 'echo "/* stubbed: no FreeRTOS in bootloader */" > "$1"' _ {} \;
-            printf '%s\n' 'idf_component_register()' > "$d/CMakeLists.txt"
-          fi
-        }
+        CAM_MODEL=ESP32S3_EYE
+        BUILD_DIR="build-${BOARD}-${VARIANT}-${CAM_MODEL}"
+        CAM_API="${{ github.workspace }}/mp_camera_api"
 
         rm -rf "$BUILD_DIR"
 
-        set +e
-        make -j2 BOARD="$BOARD" BOARD_VARIANT="$VARIANT" USER_C_MODULES="$USER_MOD"
-        RC=$?
-        set -e
+        # Misma receta que el CI oficial de cnadler86/micropython-camera-API
+        IDF_CMD=(
+          idf.py
+          -B "$BUILD_DIR"
+          -D "MICROPY_BOARD=${BOARD}"
+          -D "MICROPY_BOARD_VARIANT=${VARIANT}"
+          -D "MICROPY_CAMERA_MODEL=${CAM_MODEL}"
+          -D "USER_C_MODULES=${CAM_API}/micropython.cmake"
+          -D "EXTRA_COMPONENT_DIRS=${CAM_API}"
+          build
+        )
 
-        if [ "$RC" -eq 0 ]; then
-          echo "Build OK"
-          exit 0
+        echo "Running: ${IDF_CMD[*]}"
+        "${IDF_CMD[@]}"
+
+        # Empaquetar firmware.bin unificado
+        python makeimg.py \
+          "$BUILD_DIR/sdkconfig" \
+          "$BUILD_DIR/bootloader/bootloader.bin" \
+          "$BUILD_DIR/partition_table/partition-table.bin" \
+          "$BUILD_DIR/micropython.bin" \
+          "$BUILD_DIR/firmware.bin" \
+          "$BUILD_DIR/micropython.uf2"
+
+        # Verificación: el bin debe contener el módulo camera
+        echo "=== Verifying camera symbols in firmware.bin ==="
+        if ! strings "$BUILD_DIR/firmware.bin" | grep -E -q 'esp_camera|OV2640|PixelFormat|FrameSize'; then
+          echo "ERROR: firmware.bin no contiene símbolos de cámara"
+          strings "$BUILD_DIR/firmware.bin" | grep -i cam | head -20 || true
+          exit 1
         fi
+        echo "Camera symbols OK"
+        ls -lh "$BUILD_DIR/firmware.bin"
 
-        echo "Build falló; aplicando neutralización de esp_jpeg en bootloader y reintentando..."
-        neutralize_bootloader_jpeg
-        # Rebuild completo (borrar solo bootloader rompe la cache de CMake)
-        rm -rf "$BUILD_DIR"
-        neutralize_bootloader_jpeg
-        make -j2 BOARD="$BOARD" BOARD_VARIANT="$VARIANT" USER_C_MODULES="$USER_MOD"
+        # Exponer path al job de upload
+        echo "FW_DIR=${{ github.workspace }}/micropython/ports/esp32/${BUILD_DIR}" >> "$GITHUB_ENV"
 
-    - name: Upload Firmware Artifacts
+    - name: Upload firmware artifact
       uses: actions/upload-artifact@v4
       with:
-        name: micropython-esp32s3-camera-firmware
+        name: micropython-esp32s3-eye-camera
         path: |
-          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
-          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/bootloader/bootloader.bin
-          ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/partition_table/partition-table.bin
+          ${{ env.FW_DIR }}/firmware.bin
+          ${{ env.FW_DIR }}/bootloader/bootloader.bin
+          ${{ env.FW_DIR }}/partition_table/partition-table.bin
+        if-no-files-found: error
