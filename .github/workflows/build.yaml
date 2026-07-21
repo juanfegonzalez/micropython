@@ -71,15 +71,14 @@ jobs:
 
     - name: Patch Framework (Fix Bootloader & JPEG Conflict)
       run: |
-        find . -name "CMakeLists.txt" | grep "esp_jpeg" | xargs -I {} sh -c '
-          if ! grep -q "BOOTLOADER_BUILD" {}; then
-            echo "if(NOT BOOTLOADER_BUILD)" > {}.tmp
-            cat {} >> {}.tmp
-            echo "endif()" >> {}.tmp
-            mv {}.tmp {}
-            echo "Parcheado bootloader en: {}"
+        # Solo sirve si esp_jpeg ya existe; el parche real está en Compile (tras el fetch).
+        find . -type f -name 'CMakeLists.txt' 2>/dev/null | grep -E 'esp_jpeg|espressif__esp_jpeg' | while read -r f; do
+          if ! grep -q 'NOT BOOTLOADER_BUILD' "$f"; then
+            { echo 'if(NOT BOOTLOADER_BUILD)'; cat "$f"; echo 'endif()'; } > "$f.tmp"
+            mv "$f.tmp" "$f"
+            echo "Parcheado: $f"
           fi
-        '
+        done || true
 
     # El driver se enlaza vía USER_C_MODULES (micropython.cmake).
     # No basta con copiar fuentes a camera_modules: sin USER_C_MODULES no existe import camera.
@@ -179,14 +178,50 @@ jobs:
 
     - name: Compile Firmware
       run: |
+        set -euo pipefail
         source ports/esp32/esp-idf/export.sh
         cd ports/esp32
-        rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
-        # Sin USER_C_MODULES el bin sale "dirty" pero sin módulo camera (lo que pasó con el artefacto actual)
-        make -j2 \
-          BOARD=ESP32_GENERIC_S3 \
-          BOARD_VARIANT=SPIRAM_OCT \
-          USER_C_MODULES="${{ github.workspace }}/micropython-camera-driver/src/micropython.cmake"
+
+        BOARD=ESP32_GENERIC_S3
+        VARIANT=SPIRAM_OCT
+        BUILD_DIR="build-${BOARD}-${VARIANT}"
+        USER_MOD="${{ github.workspace }}/micropython-camera-driver/src/micropython.cmake"
+
+        patch_esp_jpeg() {
+          echo "=== Buscando CMakeLists de esp_jpeg para excluirlos del bootloader ==="
+          find "${{ github.workspace }}" "$IDF_PATH" -type f -name 'CMakeLists.txt' 2>/dev/null \
+            | grep -E 'esp_jpeg|espressif__esp_jpeg' \
+            | while read -r f; do
+                if grep -q 'NOT BOOTLOADER_BUILD' "$f"; then
+                  echo "Ya parcheado: $f"
+                  continue
+                fi
+                { echo 'if(NOT BOOTLOADER_BUILD)'; cat "$f"; echo 'endif()'; } > "$f.tmp"
+                mv "$f.tmp" "$f"
+                echo "Parcheado: $f"
+              done || true
+        }
+
+        rm -rf "$BUILD_DIR"
+
+        # 1) Primera pasada: descarga managed_components (espressif__esp_jpeg en bootloader).
+        #    Suele fallar exactamente con FreeRTOS.h; eso es esperado.
+        set +e
+        make -j2 BOARD="$BOARD" BOARD_VARIANT="$VARIANT" USER_C_MODULES="$USER_MOD"
+        FIRST_RC=$?
+        set -e
+
+        # 2) Parchear esp_jpeg ahora que existe bajo bootloader/subproject/managed_components
+        patch_esp_jpeg
+
+        if [ "$FIRST_RC" -eq 0 ]; then
+          echo "Build OK en la primera pasada"
+          exit 0
+        fi
+
+        # 3) Limpiar solo el bootloader y reintentar con el CMakeLists ya envuelto
+        rm -rf "$BUILD_DIR/bootloader"
+        make -j2 BOARD="$BOARD" BOARD_VARIANT="$VARIANT" USER_C_MODULES="$USER_MOD"
 
     - name: Upload Firmware Artifacts
       uses: actions/upload-artifact@v4
