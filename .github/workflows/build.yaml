@@ -63,6 +63,8 @@ jobs:
         }
         test -f "$MODULES"
         test -f "${{ github.workspace }}/firmware/patches/tensorflow-microlite.c"
+        test -f "${{ github.workspace }}/firmware/partitions-8MiB-ai.csv"
+        test -f "${{ github.workspace }}/firmware/sdkconfig.ai"
 
     # Los usermods marcan flags/macros como INTERFACE y se filtran a TODO MicroPython
     # + microlite upstream es pre-1.23 (STATIC / old mp_obj_type_t).
@@ -221,6 +223,15 @@ jobs:
         CAM_API="${{ github.workspace }}/mp_camera_api"
         TFLM_MP="${{ github.workspace }}/tflm_mp"
         MODULES="${{ github.workspace }}/firmware/micropython.cmake"
+        FW_DIR="${{ github.workspace }}/firmware"
+
+        # Partición factory 3MB (el bin con camera+tflite ~2.0MB no cabe en 0x1F0000)
+        cp "$FW_DIR/partitions-8MiB-ai.csv" ./partitions-8MiB-ai.csv
+        cp "$FW_DIR/sdkconfig.ai" ./boards/sdkconfig.ai
+        if ! grep -q 'sdkconfig.ai' "boards/${BOARD}/mpconfigvariant_${VARIANT}.cmake"; then
+          echo 'list(APPEND SDKCONFIG_DEFAULTS boards/sdkconfig.ai)' \
+            >> "boards/${BOARD}/mpconfigvariant_${VARIANT}.cmake"
+        fi
 
         rm -rf "$BUILD_DIR"
 
