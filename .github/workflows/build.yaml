@@ -134,7 +134,7 @@ jobs:
           mv temp_mpool.h "$MPOOL_FILE"
         fi
 
-        echo "=== Parcheando db.h con la firma completa de __bt_open ==="
+        echo "=== Parcheando db.h de forma limpia y transparente ==="
         DB_HEADER="lib/berkeley-db-1.xx/include/db.h"
         if [ -f "$DB_HEADER" ]; then
           printf '%s\n' \
@@ -150,9 +150,7 @@ jobs:
             '} FILEVTABLE;' \
             '#endif' \
             'struct __db;' \
-            'struct __btinfo;' \
-            'typedef struct __btinfo BTREEINFO;' \
-            'struct __db *__bt_open(const char *, const FILEVTABLE *, const struct __btinfo *, int, int, int);' \
+            'struct __db *__bt_open(const char *, const FILEVTABLE *, const void *, int, int, int);' \
             > temp_db.h
 
           cat "$DB_HEADER" >> temp_db.h
