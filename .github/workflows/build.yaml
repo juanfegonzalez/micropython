@@ -93,7 +93,7 @@ jobs:
         mkdir -p lib/berkeley-db-1.xx
         cp -r btree-temp/. lib/berkeley-db-1.xx/
 
-    - name: Bypass CMake Submodule Checks and Force Compile Flags
+    - name: Bypass CMake Submodule Checks and Patch Berkeley DB Headers
       run: |
         # 1. Bypass para berkeley-db en extmod.cmake
         if [ -f "extmod/extmod.cmake" ]; then
@@ -101,23 +101,24 @@ jobs:
           sed -i 's/message(SEND_ERROR.*berkeley-db.*)/message(STATUS "Bypassed berkeley-db error")/g' extmod/extmod.cmake
           sed -i 's/message(FATAL_ERROR/message(STATUS/g' extmod/extmod.cmake 2>/dev/null || true
           
-          # Mapeo y copiado de archivos para extmod/berkeley-db
+          # Enlaces simbólicos y copia limpia para extmod/berkeley-db
           mkdir -p extmod/berkeley-db
           ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/db.h" extmod/berkeley-db/db.h
           ln -sfn "${{ github.workspace }}/lib/berkeley-db-1.xx/include/mpool.h" extmod/berkeley-db/mpool.h
           cp -rs "${{ github.workspace }}/lib/berkeley-db-1.xx/btree/." extmod/berkeley-db/
 
-          # Añadir directorios de inclusión a nivel de CMake
+          # Directorios de inclusión para el target de CMake
           echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/include\")" >> extmod/extmod.cmake
           echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
         fi
 
-        echo "=== Inyectando parches directamente en compat.h y db.h de berkeley-db ==="
-        
-        # Preparamos el bloque de macros a inyectar
-        FIX_BLOCK=$(cat << 'EOF'
+        echo "=== Inyectando macros dentro de berkeley-db/include/compat.h ==="
+        # Inyectamos las macros CIRCLEQ y SWAP dentro de compat.h justo después de los includes de sistema
+        COMPAT_FILE="lib/berkeley-db-1.xx/include/compat.h"
+        if [ -f "$COMPAT_FILE" ]; then
+          cat << 'EOF' >> "$COMPAT_FILE"
 
-        /* --- FIX ESP-IDF v5.x macros for CIRCLEQ and SWAP --- */
+        /* --- ESP-IDF v5.x compatibility macros --- */
         #include <sys/types.h>
         #include <stdint.h>
         
@@ -137,28 +138,15 @@ jobs:
         #endif
         /* --- END FIX --- */
         EOF
-        )
-
-        # Inyectamos al principio de compat.h
-        COMPAT_FILE="lib/berkeley-db-1.xx/include/compat.h"
-        if [ -f "$COMPAT_FILE" ]; then
-          echo "$FIX_BLOCK" | cat - "$COMPAT_FILE" > temp && mv temp "$COMPAT_FILE"
-          echo "Inyectado en compat.h"
+          echo "compat.h parcheado correctamente."
         fi
 
-        # Inyectamos al principio de db.h
-        DB_FILE="lib/berkeley-db-1.xx/include/db.h"
-        if [ -f "$DB_FILE" ]; then
-          echo "$FIX_BLOCK" | cat - "$DB_FILE" > temp && mv temp "$DB_FILE"
-          echo "Inyectado en db.h"
-        fi
-        
         # 2. Bypass para micropython-lib en py/mkrules.cmake
         if [ -f "py/mkrules.cmake" ]; then
           sed -i 's/message(FATAL_ERROR.*micropython-lib.*)/message(STATUS "Bypassed micropython-lib error")/g' py/mkrules.cmake
           sed -i 's/message(SEND_ERROR.*micropython-lib.*)/message(STATUS "Bypassed micropython-lib error")/g' py/mkrules.cmake
           sed -i 's/message(FATAL_ERROR/message(STATUS/g' py/mkrules.cmake 2>/dev/null || true
-          echo "Validación de py/mkrules.cmake parcheada."
+          echo "py/mkrules.cmake parcheado."
         fi
         
     - name: Compile Firmware
