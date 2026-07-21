@@ -62,18 +62,34 @@ jobs:
           exit 1
         }
         test -f "$MODULES"
+        test -f "${{ github.workspace }}/firmware/patches/tensorflow-microlite.c"
 
     # Los usermods marcan flags/macros como INTERFACE y se filtran a TODO MicroPython
-    # (p.ej. -fno-rtti en .c, -O3 rompe modbluetooth, audio_frontend exige ulab).
-    - name: Patch camera + microlite cmake for IDF5
+    # + microlite upstream es pre-1.23 (STATIC / old mp_obj_type_t).
+    - name: Patch camera + microlite for modern MicroPython / IDF5
       env:
         CAM_CMAKE: ${{ github.workspace }}/mp_camera_api/micropython.cmake
         ML_CMAKE: ${{ github.workspace }}/tflm_mp/micropython-modules/microlite/micropython.cmake
+        ML_DIR: ${{ github.workspace }}/tflm_mp/micropython-modules/microlite
+        ML_PATCH: ${{ github.workspace }}/firmware/patches/tensorflow-microlite.c
       run: |
         set -euo pipefail
+
+        # Binding actualizado (MP_DEFINE_CONST_OBJ_TYPE, sin STATIC, sin audio_frontend/ulab)
+        cp "$ML_PATCH" "$ML_DIR/tensorflow-microlite.c"
+
+        # openmv-*.cpp aún usa STATIC
         python3 - <<'PY'
         import os, re
         from pathlib import Path
+
+        ml_dir = Path(os.environ["ML_DIR"])
+        for p in ml_dir.glob("*.cpp"):
+            t = p.read_text()
+            t2 = re.sub(r"\bSTATIC\b", "static", t)
+            if t2 != t:
+                p.write_text(t2)
+                print("STATIC->static:", p.name)
 
         cam = Path(os.environ["CAM_CMAKE"])
         text = cam.read_text()
@@ -91,18 +107,12 @@ jobs:
 
         ml = Path(os.environ["ML_CMAKE"])
         ml_text = ml.read_text()
-
-        # 1) C++-only flags
         ml_text = ml_text.replace("-fno-rtti", "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>")
         ml_text = ml_text.replace("-fno-exceptions", "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>")
-
-        # 2) No subir -O3/-O2 a TODO el firmware (provoca -Werror=stringop-overflow en modbluetooth)
         ml_text, n_o3 = re.subn(r"^\s*-O3\s*$", "    # (patched) removed -O3 leak", ml_text, flags=re.M)
         ml_text, n_o2 = re.subn(r"^\s*-O2\s*$", "    # (patched) removed -O2 leak", ml_text, flags=re.M)
         if n_o3 + n_o2 < 1:
             raise SystemExit("microlite cmake: no -O2/-O3 lines found")
-
-        # 3) Quitar audio_frontend.c (depende de ulab/ndarray.h; no hace falta para person_detect)
         ml_text2, n_af = re.subn(
             r"^[ \t]*\$\{CMAKE_CURRENT_LIST_DIR\}/audio_frontend\.c\s*\n",
             "",
@@ -112,14 +122,11 @@ jobs:
         if n_af < 1:
             raise SystemExit(f"microlite cmake: audio_frontend.c not removed (matches={n_af})")
         ml_text = ml_text2
-
-        # 4) Extra: no tratar stringop-overflow como error si aún se cuela algo
         if "-Wno-error=stringop-overflow" not in ml_text:
             ml_text = ml_text.replace(
                 "-Wno-error=maybe-uninitialized",
                 "-Wno-error=maybe-uninitialized\n    -Wno-error=stringop-overflow",
             )
-
         ml.write_text(ml_text)
         print(f"patched microlite cmake (O removed={n_o2+n_o3}, audio_frontend removed={n_af})")
         PY
@@ -127,6 +134,8 @@ jobs:
         ! grep -q 'MICROPY_ROM_TEXT_COMPRESSION=0' "$CAM_CMAKE"
         ! grep -q 'audio_frontend.c' "$ML_CMAKE"
         ! grep -E -q '^\s*-O3\s*$' "$ML_CMAKE"
+        ! grep -q '\bSTATIC\b' "$ML_DIR/tensorflow-microlite.c"
+        grep -q 'MP_DEFINE_CONST_OBJ_TYPE' "$ML_DIR/tensorflow-microlite.c"
         grep -q 'COMPILE_LANGUAGE:CXX>:-fno-rtti' "$ML_CMAKE"
 
     - name: Set up Python
