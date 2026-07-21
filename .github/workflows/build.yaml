@@ -110,10 +110,34 @@ jobs:
           echo "include_directories(\"${{ github.workspace }}/lib/berkeley-db-1.xx/btree\")" >> extmod/extmod.cmake
         fi
 
-        echo "=== Inyectando bloque de compatibilidad en compat.h ==="
+        echo "=== Inyectando bloque completo de macros directamente en mpool.h y compat.h ==="
+        
+        MPOOL_FILE="lib/berkeley-db-1.xx/include/mpool.h"
+        if [ -f "$MPOOL_FILE" ]; then
+          printf '%s\n' \
+            '#include <sys/types.h>' \
+            '#include <stdint.h>' \
+            '#ifndef CIRCLEQ_ENTRY' \
+            '#define CIRCLEQ_ENTRY(type) struct { struct type *cqe_next; struct type *cqe_prev; }' \
+            '#define CIRCLEQ_HEAD(name, type) struct name { struct type *cqh_first; struct type *cqh_last; }' \
+            '#define CIRCLEQ_INIT(head) do { (head)->cqh_first = (void *)(head); (head)->cqh_last = (void *)(head); } while (0)' \
+            '#define CIRCLEQ_INSERT_HEAD(head, elm, field) do { (elm)->field.cqe_next = (head)->cqh_first; (elm)->field.cqe_prev = (void *)(head); if ((head)->cqh_last == (void *)(head)) (head)->cqh_last = (elm); else (head)->cqh_first->field.cqe_prev = (elm); (head)->cqh_first = (elm); } while (0)' \
+            '#define CIRCLEQ_INSERT_TAIL(head, elm, field) do { (elm)->field.cqe_next = (void *)(head); (elm)->field.cqe_prev = (head)->cqh_last; if ((head)->cqh_first == (void *)(head)) (head)->cqh_first = (elm); else (head)->cqh_last->field.cqe_next = (elm); (head)->cqh_last = (elm); } while (0)' \
+            '#define CIRCLEQ_REMOVE(head, elm, field) do { if ((elm)->field.cqe_next == (void *)(head)) (head)->cqh_last = (elm)->field.cqe_prev; else (elm)->field.cqe_next->field.cqe_prev = (elm)->field.cqe_prev; if ((elm)->field.cqe_prev == (void *)(head)) (head)->cqh_first = (elm)->field.cqe_next; else (elm)->field.cqe_prev->field.cqe_next = (elm)->field.cqe_next; } while (0)' \
+            '#endif' \
+            '#ifndef M_16_SWAP' \
+            '#define M_16_SWAP(x) (__builtin_bswap16(x))' \
+            '#define M_32_SWAP(x) (__builtin_bswap32(x))' \
+            '#define P_32_SWAP(x) (*((uint32_t*)(x)) = __builtin_bswap32(*((uint32_t*)(x))))' \
+            '#endif' > temp_mpool.h
+
+          cat "$MPOOL_FILE" >> temp_mpool.h
+          mv temp_mpool.h "$MPOOL_FILE"
+          echo "mpool.h parcheado con el set completo de CIRCLEQ y SWAP."
+        fi
+
         COMPAT_FILE="lib/berkeley-db-1.xx/include/compat.h"
         if [ -f "$COMPAT_FILE" ]; then
-          # Creamos una cabecera limpia con printf evitando fallos de EOF
           printf '%s\n' \
             '#include <sys/types.h>' \
             '#include <stdint.h>' \
@@ -133,14 +157,7 @@ jobs:
 
           cat "$COMPAT_FILE" >> temp_compat.h
           mv temp_compat.h "$COMPAT_FILE"
-          echo "compat.h parcheado correctamente con CIRCLEQ y SWAP."
-        fi
-
-        echo "=== Asegurando inclusión de compat.h en mpool.h ==="
-        MPOOL_FILE="lib/berkeley-db-1.xx/include/mpool.h"
-        if [ -f "$MPOOL_FILE" ]; then
-          sed -i '1i #include "compat.h"' "$MPOOL_FILE"
-          echo "mpool.h parcheado para incluir compat.h."
+          echo "compat.h parcheado correctamente."
         fi
 
         # 2. Bypass para micropython-lib en py/mkrules.cmake
