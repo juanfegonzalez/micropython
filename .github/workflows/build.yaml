@@ -173,6 +173,10 @@ jobs:
           sed -i 's/message(FATAL_ERROR/message(STATUS/g' py/mkrules.cmake 2>/dev/null || true
         fi
     
+    - name: Clone esp32-camera component
+      run: |
+        mkdir -p ports/esp32/components
+        git clone --depth 1 https://github.com/espressif/esp32-camera.git ports/esp32/components/esp32-camera
         
     - name: Compile Firmware
       run: |
