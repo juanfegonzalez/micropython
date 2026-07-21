@@ -64,6 +64,10 @@ jobs:
         test -f "$MODULES"
         test -f "${{ github.workspace }}/firmware/patches/tensorflow-microlite.c"
         test -f "${{ github.workspace }}/firmware/partitions-8MiB-ai.csv"
+        # Aceptar typo sdkconfig.ia → sdkconfig.ai
+        if [[ -f "${{ github.workspace }}/firmware/sdkconfig.ia" && ! -f "${{ github.workspace }}/firmware/sdkconfig.ai" ]]; then
+          mv "${{ github.workspace }}/firmware/sdkconfig.ia" "${{ github.workspace }}/firmware/sdkconfig.ai"
+        fi
         test -f "${{ github.workspace }}/firmware/sdkconfig.ai"
 
     # Los usermods marcan flags/macros como INTERFACE y se filtran a TODO MicroPython
@@ -225,9 +229,36 @@ jobs:
         MODULES="${{ github.workspace }}/firmware/micropython.cmake"
         FW_DIR="${{ github.workspace }}/firmware"
 
-        # Partición factory 3MB (el bin con camera+tflite ~2.0MB no cabe en 0x1F0000)
+        # Forzar partición grande: sdkconfig.base apunta a partitions-4MiBplus.csv
+        # (sdkconfig.ai a veces no gana sobre los choice de flash/partition).
         cp "$FW_DIR/partitions-8MiB-ai.csv" ./partitions-8MiB-ai.csv
-        cp "$FW_DIR/sdkconfig.ai" ./boards/sdkconfig.ai
+        cp "$FW_DIR/partitions-8MiB-ai.csv" ./partitions-4MiBplus.csv
+        if [[ -f "$FW_DIR/sdkconfig.ai" ]]; then
+          cp "$FW_DIR/sdkconfig.ai" ./boards/sdkconfig.ai
+        elif [[ -f "$FW_DIR/sdkconfig.ia" ]]; then
+          cp "$FW_DIR/sdkconfig.ia" ./boards/sdkconfig.ai
+        fi
+        # Parchear sdkconfig.base directamente (fuente de verdad del board)
+        python3 - <<'PY'
+        from pathlib import Path
+        p = Path("boards/sdkconfig.base")
+        t = p.read_text()
+        t = t.replace("CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y", "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y")
+        t = t.replace(
+            'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-4MiBplus.csv"',
+            'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-8MiB-ai.csv"',
+        )
+        if "FLASHSIZE_8MB=y" not in t:
+            raise SystemExit("failed to set FLASHSIZE_8MB in sdkconfig.base")
+        if "partitions-8MiB-ai.csv" not in t:
+            raise SystemExit("failed to set partition csv in sdkconfig.base")
+        p.write_text(t)
+        print("patched boards/sdkconfig.base:")
+        for line in p.read_text().splitlines():
+            if "FLASHSIZE" in line or "PARTITION_TABLE" in line:
+                print(" ", line)
+        PY
+        # También append sdkconfig.ai por si acaso
         if ! grep -q 'sdkconfig.ai' "boards/${BOARD}/mpconfigvariant_${VARIANT}.cmake"; then
           echo 'list(APPEND SDKCONFIG_DEFAULTS boards/sdkconfig.ai)' \
             >> "boards/${BOARD}/mpconfigvariant_${VARIANT}.cmake"
@@ -277,6 +308,14 @@ jobs:
         fi
         echo "Camera + microlite symbols OK"
         ls -lh "$BUILD_DIR/firmware.bin"
+        echo "=== partition table (factory must be >= bin) ==="
+        grep -E 'factory|FLASHSIZE|PARTITION' "$BUILD_DIR/sdkconfig" | head -20 || true
+        python3 - <<PY
+        from pathlib import Path
+        csv = Path("partitions-8MiB-ai.csv").read_text()
+        assert "0x300000" in csv, csv
+        print("partitions-8MiB-ai.csv OK")
+        PY
 
     - name: Upload firmware artifact
       uses: actions/upload-artifact@v4
