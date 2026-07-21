@@ -134,20 +134,25 @@ jobs:
           mv temp_mpool.h "$MPOOL_FILE"
         fi
 
-        echo "=== Parcheando db.h para declarar FILEVTABLE y __bt_open ==="
+        echo "=== Parcheando db.h con la firma completa de __bt_open ==="
         DB_HEADER="lib/berkeley-db-1.xx/include/db.h"
         if [ -f "$DB_HEADER" ]; then
           printf '%s\n' \
             '#include <sys/types.h>' \
             '#include <stdint.h>' \
+            '#ifndef FILEVTABLE_DEFINED' \
+            '#define FILEVTABLE_DEFINED' \
             'typedef struct {' \
             '    ssize_t (*read)(void *, void *, size_t);' \
             '    ssize_t (*write)(void *, const void *, size_t);' \
             '    off_t (*seek)(void *, off_t, int);' \
             '    int (*fsync)(void *);' \
             '} FILEVTABLE;' \
+            '#endif' \
+            'struct __db;' \
             'struct __btinfo;' \
-            'struct __db *__bt_open(const char *, const FILEVTABLE *, const struct __btinfo *, int);' \
+            'typedef struct __btinfo BTREEINFO;' \
+            'struct __db *__bt_open(const char *, const FILEVTABLE *, const struct __btinfo *, int, int, int);' \
             > temp_db.h
 
           cat "$DB_HEADER" >> temp_db.h
