@@ -134,7 +134,7 @@ jobs:
           mv temp_mpool.h "$MPOOL_FILE"
         fi
 
-        echo "=== Parcheando db.h ==="
+        echo "=== Parcheando db.h para MicroPython ==="
         DB_HEADER="lib/berkeley-db-1.xx/include/db.h"
         if [ -f "$DB_HEADER" ]; then
           printf '%s\n' \
@@ -150,14 +150,14 @@ jobs:
             '} FILEVTABLE;' \
             '#endif' \
             'struct __db;' \
-            'struct __db *__bt_open(const char *fname, const FILEVTABLE *vtable, const void *openinfo, int flags, int mode, int dflags);' \
+            'struct __db *__bt_open(const void *fname, const FILEVTABLE *vtable, const void *openinfo, int dflags);' \
             > temp_db.h
 
           cat "$DB_HEADER" >> temp_db.h
           mv temp_db.h "$DB_HEADER"
         fi
 
-        echo "=== Modernizando la firma de bt_open.c a ANSI C ==="
+        echo "=== Sincronizando la firma de bt_open.c con modbtree.c ==="
         BT_OPEN_FILE="lib/berkeley-db-1.xx/btree/bt_open.c"
         if [ -f "$BT_OPEN_FILE" ]; then
           python3 -c '
@@ -166,7 +166,7 @@ jobs:
             content = f.read()
         
         pattern = r"__bt_open\s*\([^)]*\)\s*const\s+char\s*\*fname;[\s\S]*?\{\s*"
-        replacement = "__bt_open(const char *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int flags, int mode, int dflags)\n{\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n"
+        replacement = "__bt_open(const void *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int dflags)\n{\n    int flags = 0, mode = 0;\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n"
         
         new_content = re.sub(pattern, replacement, content)
         with open("lib/berkeley-db-1.xx/btree/bt_open.c", "w") as f:
