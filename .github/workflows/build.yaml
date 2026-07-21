@@ -157,21 +157,25 @@ jobs:
           mv temp_db.h "$DB_HEADER"
         fi
 
-        echo "=== Sincronizando la firma de bt_open.c con modbtree.c ==="
+        echo "=== Sincronizando la firma de bt_open.c y definiendo stub de sigprocmask ==="
         BT_OPEN_FILE="lib/berkeley-db-1.xx/btree/bt_open.c"
         if [ -f "$BT_OPEN_FILE" ]; then
+          # Define macro stub para sigprocmask
+          sed -i '1i #ifndef sigprocmask\n#define sigprocmask(how, set, oset) (0)\n#endif' "$BT_OPEN_FILE"
+
+          # Parchea la firma a 4 parametros
           python3 -c '
-        import re
-        with open("lib/berkeley-db-1.xx/btree/bt_open.c", "r") as f:
-            content = f.read()
-        
-        pattern = r"__bt_open\s*\([^)]*\)\s*const\s+char\s*\*fname;[\s\S]*?\{\s*"
-        replacement = "__bt_open(const void *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int dflags)\n{\n    int flags = 0, mode = 0;\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n"
-        
-        new_content = re.sub(pattern, replacement, content)
-        with open("lib/berkeley-db-1.xx/btree/bt_open.c", "w") as f:
-            f.write(new_content)
-        '
+          import re
+          with open("lib/berkeley-db-1.xx/btree/bt_open.c", "r") as f:
+              content = f.read()
+          
+          pattern = r"__bt_open\s*\([^)]*\)\s*const\s+char\s*\*fname;[\s\S]*?\{\s*"
+          replacement = "__bt_open(const void *fname, const FILEVTABLE *vtable, const void *openinfo_arg, int dflags)\n{\n    int flags = 0, mode = 0;\n    const BTREEINFO *openinfo = (const BTREEINFO *)openinfo_arg;\n"
+          
+          new_content = re.sub(pattern, replacement, content)
+          with open("lib/berkeley-db-1.xx/btree/bt_open.c", "w") as f:
+              f.write(new_content)
+          '
         fi
 
         # 2. Bypass para micropython-lib en py/mkrules.cmake
