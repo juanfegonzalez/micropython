@@ -106,7 +106,7 @@ static mp_obj_t tensor_get_value (mp_obj_t self_in, mp_obj_t index_obj) {
         return mp_obj_new_int(int8_value);
     }
     else {
-        mp_raise_TypeError("Unsupported Tensor Type");
+        mp_raise_TypeError(MP_ERROR_TEXT("Unsupported Tensor Type"));
     }
 
     return mp_const_none;
@@ -140,7 +140,7 @@ static mp_obj_t tensor_set_value (mp_obj_t self_in, mp_obj_t index_obj, mp_obj_t
         tensor->data.uint8[index] = uint8_value;
     }
     else {
-        mp_raise_TypeError("Unsupported Tensor Type");
+        mp_raise_TypeError(MP_ERROR_TEXT("Unsupported Tensor Type"));
     }
 
     return MP_OBJ_FROM_PTR(self);
@@ -151,7 +151,7 @@ MP_DEFINE_CONST_FUN_OBJ_3(microlite_tensor_set_value, tensor_set_value);
 static mp_obj_t tensor_quantize_float_to_int8 (mp_obj_t self_in, mp_obj_t float_obj) {
     
     if (!mp_obj_is_float(float_obj)) {
-         mp_raise_TypeError("Expecting Parameter of float type");
+         mp_raise_TypeError(MP_ERROR_TEXT("Expecting Parameter of float type"));
         // return mp_const_none;
     }
 
@@ -160,7 +160,7 @@ static mp_obj_t tensor_quantize_float_to_int8 (mp_obj_t self_in, mp_obj_t float_
     TfLiteTensor * tensor = (TfLiteTensor *)self->tf_tensor;
 
     if (tensor->type != kTfLiteInt8) {
-        mp_raise_TypeError ("Expected Tensor to be of type ktfLiteInt8.");
+        mp_raise_TypeError(MP_ERROR_TEXT("Expected Tensor to be of type ktfLiteInt8."));
     }
 
     // may need to add #ifdef sheild on this method as its only defined on boards with floating point
@@ -177,7 +177,7 @@ MP_DEFINE_CONST_FUN_OBJ_2(microlite_tensor_quantize_float_to_int8, tensor_quanti
 static mp_obj_t tensor_quantize_int8_to_float (mp_obj_t self_in, mp_obj_t int_obj) {
     
     if (!mp_obj_is_integer(int_obj)) {
-         mp_raise_TypeError("Expecting Parameter of float type");
+         mp_raise_TypeError(MP_ERROR_TEXT("Expecting Parameter of float type"));
         // return mp_const_none;
     }
 
@@ -186,7 +186,7 @@ static mp_obj_t tensor_quantize_int8_to_float (mp_obj_t self_in, mp_obj_t int_ob
     TfLiteTensor * tensor = (TfLiteTensor *)self->tf_tensor;
 
     if (tensor->type != kTfLiteInt8) {
-        mp_raise_TypeError ("Expected Tensor to be of type ktfLiteInt8.");
+        mp_raise_TypeError(MP_ERROR_TEXT("Expected Tensor to be of type ktfLiteInt8."));
     }
 
     // may need to add #ifdef sheild on this method as its only defined on boards with floating point
@@ -225,17 +225,8 @@ MP_DEFINE_CONST_OBJ_TYPE(
 static void interpreter_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     (void)kind;
     microlite_interpreter_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    mp_print_str(print, "interpreter(");
-    
-    mp_printf(print, "model size = %d, tensor_area size = %d\n", self->model_data->len, self->tensor_area->len);
-    
-    microlite_tensor_obj_t *input_tensor = MP_OBJ_TO_PTR(interpreter_get_input_tensor(self, 0));
-
-    microlite_tensor_obj_t *output_tensor = MP_OBJ_TO_PTR(interpreter_get_input_tensor(self, 0));
-
-    mp_obj_print_helper (print, output_tensor, PRINT_STR);
-
-    mp_print_str(print, ")");
+    mp_printf(print, "interpreter(model size = %d, tensor_area size = %d)",
+              self->model_data->len, self->tensor_area->len);
 }
 
 static mp_obj_t interpreter_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
