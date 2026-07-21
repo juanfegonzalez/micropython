@@ -24,6 +24,7 @@
  * THE SOFTWARE.
  */
 // Include MicroPython API.
+#include <string.h>
 #include "py/runtime.h"
 #include "py/mpprint.h"
 #include "py/objstr.h"
@@ -148,6 +149,32 @@ static mp_obj_t tensor_set_value (mp_obj_t self_in, mp_obj_t index_obj, mp_obj_t
 
 MP_DEFINE_CONST_FUN_OBJ_3(microlite_tensor_set_value, tensor_set_value);
 
+// Copia rápida: buffer uint8 (p.ej. gris cámara) → tensor int8 (v - 128).
+static mp_obj_t tensor_write_from_u8(mp_obj_t self_in, mp_obj_t data_obj) {
+    microlite_tensor_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    TfLiteTensor *tensor = (TfLiteTensor *)self->tf_tensor;
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(data_obj, &bufinfo, MP_BUFFER_READ);
+    size_t n = (size_t)tensor->bytes;
+    if (bufinfo.len < n) {
+        mp_raise_ValueError(MP_ERROR_TEXT("buffer too small for tensor"));
+    }
+    const uint8_t *src = (const uint8_t *)bufinfo.buf;
+    if (tensor->type == kTfLiteInt8) {
+        int8_t *dst = tensor->data.int8;
+        for (size_t i = 0; i < n; i++) {
+            dst[i] = (int8_t)((int)src[i] - 128);
+        }
+    } else if (tensor->type == kTfLiteUInt8) {
+        memcpy(tensor->data.uint8, src, n);
+    } else {
+        mp_raise_TypeError(MP_ERROR_TEXT("Unsupported Tensor Type"));
+    }
+    return mp_const_none;
+}
+
+static MP_DEFINE_CONST_FUN_OBJ_2(microlite_tensor_write_from_u8, tensor_write_from_u8);
+
 static mp_obj_t tensor_quantize_float_to_int8 (mp_obj_t self_in, mp_obj_t float_obj) {
     
     if (!mp_obj_is_float(float_obj)) {
@@ -204,6 +231,7 @@ MP_DEFINE_CONST_FUN_OBJ_2(microlite_tensor_quantize_int8_to_float, tensor_quanti
 static const mp_rom_map_elem_t tensor_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_getValue), MP_ROM_PTR(&microlite_tensor_get_value) },
     { MP_ROM_QSTR(MP_QSTR_setValue), MP_ROM_PTR(&microlite_tensor_set_value) },
+    { MP_ROM_QSTR(MP_QSTR_writeFromU8), MP_ROM_PTR(&microlite_tensor_write_from_u8) },
     { MP_ROM_QSTR(MP_QSTR_getType), MP_ROM_PTR(&microlite_tensor_get_tensor_type) },
     { MP_ROM_QSTR(MP_QSTR_quantizeFloatToInt8), MP_ROM_PTR(&microlite_tensor_quantize_float_to_int8) },
     { MP_ROM_QSTR(MP_QSTR_quantizeInt8ToFloat), MP_ROM_PTR(&microlite_tensor_quantize_int8_to_float) }
