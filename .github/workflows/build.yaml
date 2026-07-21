@@ -177,35 +177,55 @@ jobs:
         rm -rf "$IDF_PATH/components/esp32-camera"
         git clone --depth 1 https://github.com/espressif/esp32-camera.git "$IDF_PATH/components/esp32-camera"
 
-        # CRÍTICO: si esp32-camera declara esp_jpeg aquí, el component manager lo mete
-        # también en bootloader/subproject (sin FreeRTOS) y el build muere.
-        # Quitamos la dep del camera; la app la pedirá solo desde main/idf_component.yml.
-        python3 - <<PY
+        # esp_jpeg SÍ hace falta para compilar conversions/ de esp32-camera.
+        # Si la dep vive en idf_component.yml del camera (componente global de IDF),
+        # el bootloader también la arrastra y revienta sin FreeRTOS.
+        # Solución: dep solo en main (app) + REQUIRES explícito en CMakeLists del camera.
+        python3 - <<'PY'
         from pathlib import Path
-        import re
-        cam_yml = Path("$IDF_PATH/components/esp32-camera/idf_component.yml")
+        import os, re
+
+        idf = Path(os.environ["IDF_PATH"])
+        ws = Path("${{ github.workspace }}")
+
+        cam_yml = idf / "components/esp32-camera/idf_component.yml"
         text = cam_yml.read_text()
         text2 = re.sub(r"\n[ \t]*esp_jpeg:[^\n]*(?:\n[ \t]+[^\n]*)*", "\n", text)
         cam_yml.write_text(text2)
-        print("esp32-camera idf_component.yml without esp_jpeg:")
+        print("=== esp32-camera idf_component.yml (sin esp_jpeg) ===")
         print(cam_yml.read_text())
 
-        main_yml = Path("${{ github.workspace }}/ports/esp32/main/idf_component.yml")
+        main_yml = ws / "ports/esp32/main/idf_component.yml"
         main = main_yml.read_text()
         if "esp_jpeg" not in main:
             main = main.replace(
                 "dependencies:\n",
-                "dependencies:\n  espressif/esp_jpeg: \"~1.3.1\"\n",
+                'dependencies:\n  espressif/esp_jpeg: "~1.3.1"\n',
                 1,
             )
             main_yml.write_text(main)
             print("Added espressif/esp_jpeg to main/idf_component.yml")
-        else:
-            print("main/idf_component.yml already mentions esp_jpeg")
+        print("=== main/idf_component.yml ===")
         print(main_yml.read_text())
+
+        cam_cmake = idf / "components/esp32-camera/CMakeLists.txt"
+        cmake = cam_cmake.read_text()
+        if "espressif__esp_jpeg" not in cmake:
+            cmake = cmake.replace(
+                "list(APPEND priv_requires freertos nvs_flash esp_mm)",
+                "list(APPEND priv_requires freertos nvs_flash esp_mm espressif__esp_jpeg)",
+            )
+            # Por si la línea cambia en el futuro, forzar antes del register:
+            if "espressif__esp_jpeg" not in cmake:
+                cmake = cmake.replace(
+                    "idf_component_register(",
+                    "list(APPEND priv_requires espressif__esp_jpeg)\n\nidf_component_register(",
+                )
+            cam_cmake.write_text(cmake)
+            print("Patched esp32-camera CMakeLists.txt to PRIV_REQUIRES espressif__esp_jpeg")
         PY
 
-        # Por si quedó basura de builds anteriores en el runner cacheado
+        # Basura de bootloader de runs previos
         rm -rf "$IDF_PATH/components/bootloader/subproject/managed_components/espressif__esp_jpeg"
         rm -rf "${{ github.workspace }}/ports/esp32/managed_components/espressif__esp_jpeg"
 
